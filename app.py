@@ -14,7 +14,7 @@ import plotly.graph_objects as go
 # ------------------------------
 def get_solar_supply(lat, lon, res_area=10000, comm_area=50000):
     # simulate 7-day hourly data
-    timestamps = pd.date_range(datetime.now(), periods=168, freq='H')
+    timestamps = pd.date_range(datetime.now(), periods=168, freq='h')
     # simple GHI model
     ghi = np.maximum(0, 1000 * np.sin((timestamps.hour-6)/12*np.pi))
     cloud_factor = 1 - np.random.uniform(0.0,0.2,len(timestamps))
