@@ -1,114 +1,139 @@
 import os
 import requests
+import pandas as pd
 import yfinance as yf
-from dash import Dash, html, dcc, Input, Output, ctx, ALL
 import dash_bootstrap_components as dbc
 import dash_leaflet as dl
 import plotly.graph_objects as go
+from dash import Dash, html, dcc, Input, Output, State, ctx
+from geopy.geocoders import Nominatim
+from datetime import datetime
 
-app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+# Initialize
+app = Dash(__name__, external_stylesheets=[dbc.themes.CYBORG, dbc.icons.FONT_AWESOME])
 server = app.server
-
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+geolocator = Nominatim(user_agent="specusol_v2")
 
-# Add as many locations as you want here; the UI will update automatically
-SOLAR_DATA = {
-    "Austin": {"lat": 30.27, "lon": -97.74, "commercial": 220, "residential": 160, "demand": 300, "tou": 0.14},
-    "Dallas": {"lat": 32.77, "lon": -96.79, "commercial": 200, "residential": 140, "demand": 280, "tou": 0.13},
-    "Houston": {"lat": 29.76, "lon": -95.37, "commercial": 260, "residential": 180, "demand": 340, "tou": 0.15},
-    "San Antonio": {"lat": 29.42, "lon": -98.49, "commercial": 210, "residential": 150, "demand": 310, "tou": 0.12},
-    "El Paso": {"lat": 31.76, "lon": -106.48, "commercial": 300, "residential": 200, "demand": 250, "tou": 0.11}
-}
+# --- CUSTOM STYLING ---
+CARD_STYLE = {"padding": "20px", "borderRadius": "15px", "backgroundColor": "#111", "border": "1px solid #333"}
 
-app.layout = dbc.Container(fluid=True, children=[
-    html.H1("Specusol ☀️ Texas Solar Market Simulator", className="text-center my-3"),
+app.layout = dbc.Container(fluid=True, className="p-4", children=[
+    # Header Section
     dbc.Row([
         dbc.Col([
-            dl.Map(center=[31.0, -99.0], zoom=6, style={"height": "600px"}, children=[
-                dl.TileLayer(),
-                dl.LayerGroup([
-                    dl.Marker(
-                        position=[v["lat"], v["lon"]],
-                        children=dl.Tooltip(k),
-                        # Use 'index' for pattern matching
-                        id={"type": "city-marker", "index": k} 
-                    ) for k, v in SOLAR_DATA.items()
-                ])
+            html.H1([html.I(className="fas fa-sun me-2", style={"color": "#FFD700"}), "SPECUSOL 2.0"], className="display-4 fw-bold"),
+            html.P("Texas ERCOT Market Intelligence & Solar Forecasting", className="text-muted")
+        ], width=8),
+        dbc.Col([
+            dbc.InputGroup([
+                dbc.Input(id="zip-input", placeholder="Enter Zip Code (e.g. 78701)", type="text"),
+                dbc.Button("ANALYZE", id="zip-btn", color="warning", className="fw-bold"),
             ])
-        ], width=6),
-        dbc.Col([dcc.Graph(id="supply-demand-chart")], width=6)
-    ]),
-    html.Hr(),
-    dbc.Row([dbc.Col([dcc.Graph(id="solar-etf")], width=12)]),
-    html.Hr(),
+        ], width=4, className="align-self-center")
+    ], className="mb-4"),
+
+    # Main Grid
     dbc.Row([
+        # Left: Map & Search
         dbc.Col([
-            html.H4("Gemini AI – ERCOT Market Outlook"),
-            dcc.Loading(html.Div(id="gemini-summary", className="p-3 border"))
-        ])
+            html.Div(id="map-container", children=[
+                dl.Map(center=[31.0, -99.0], zoom=6, style={"height": "450px", "borderRadius": "15px"}, id="texas-map", children=[
+                    dl.TileLayer(url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"),
+                    dl.LayerGroup(id="marker-layer")
+                ])
+            ], style=CARD_STYLE)
+        ], width=5),
+
+        # Right: Live Supply Forecast
+        dbc.Col([
+            html.Div(dcc.Graph(id="live-supply-curve"), style=CARD_STYLE)
+        ], width=7)
+    ], className="mb-4"),
+
+    dbc.Row([
+        # Market Candlestick
+        dbc.Col([
+            html.Div([
+                html.H5("ERCOT Solar Market Volatility (Hourly)", className="text-warning mb-3"),
+                dcc.Graph(id="market-candlestick")
+            ], style=CARD_STYLE)
+        ], width=8),
+
+        # ETF & AI Insights
+        dbc.Col([
+            html.Div([
+                html.H5("Solar ETF (TAN)", className="text-info"),
+                dcc.Graph(id="solar-etf-mini", style={"height": "200px"}),
+                html.Hr(style={"borderColor": "#444"}),
+                html.H6("AI Market Outlook", className="text-warning"),
+                dcc.Loading(html.Div(id="gemini-summary", className="small text-muted"))
+            ], style=CARD_STYLE)
+        ], width=4)
     ])
 ])
 
-# FIX 3: Pattern-Matching Callback for dynamic locations
+# --- CALLBACKS ---
+
 @app.callback(
-    Output("supply-demand-chart", "figure"),
-    Input({"type": "city-marker", "index": ALL}, "n_clicks"),
+    [Output("texas-map", "center"), Output("texas-map", "zoom"), Output("marker-layer", "children")],
+    Input("zip-btn", "n_clicks"),
+    State("zip-input", "value"),
     prevent_initial_call=True
 )
-def update_chart(n_clicks):
-    # Use dash.ctx to find exactly which marker was clicked
-    triggered_id = ctx.triggered_id
-    if not triggered_id:
-        return go.Figure()
-
-    city_name = triggered_id['index']
-    d = SOLAR_DATA[city_name]
-
-    fig = go.Figure()
-    fig.add_bar(name="Commercial Supply", x=["Solar Metrics"], y=[d["commercial"]])
-    fig.add_bar(name="Residential Supply", x=["Solar Metrics"], y=[d["residential"]])
-    fig.add_scatter(name="Demand", x=["Solar Metrics"], y=[d["demand"]], mode="lines+markers")
-
-    fig.update_layout(
-        title=f"{city_name} Solar Market (TOU ${d['tou']}/kWh)",
-        barmode="group", yaxis_title="MW"
-    )
-    return fig
-
-# FIX 2: Handling yfinance MultiIndex
-@app.callback(Output("solar-etf", "figure"), Input("solar-etf", "id"))
-def load_etf(_):
-    data = yf.download("TAN", period="1y")
-    if data.empty:
-        return go.Figure().update_layout(title="Data Unavailable")
-    
-    # Flatten MultiIndex if it exists (Price/Ticker levels)
-    if isinstance(data.columns, dcc.pd.MultiIndex):
-        data.columns = data.columns.get_level_values(0)
-
-    fig = go.Figure()
-    fig.add_scatter(x=data.index, y=data["Close"], mode="lines")
-    fig.update_layout(title="Solar ETF (TAN) - Last 12 Months", xaxis_title="Date", yaxis_title="Price (USD)")
-    return fig
-
-# FIX 1: Robust Gemini JSON parsing
-@app.callback(Output("gemini-summary", "children"), Input("gemini-summary", "id"))
-def gemini_summary(_):
-    if not GEMINI_API_KEY:
-        return "Gemini API key not found in environment variables."
-
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
-    payload = {"contents": [{"parts": [{"text": "Provide a concise Texas solar market outlook for 2026."}]}]}
-
+def handle_zip(n, zip_code):
+    if not zip_code: return [31.0, -99.0], 6, []
     try:
-        r = requests.post(f"{url}?key={GEMINI_API_KEY}", json=payload, timeout=15)
-        r.raise_for_status()
-        res_json = r.json()
-        # Correct path for the 1.5 Flash API response
-        text = res_json['candidates'][0]['content']['parts'][0]['text']
-        return dcc.Markdown(text) # Markdown looks better than html.Pre
-    except Exception as e:
-        return f"Error connecting to AI: {str(e)}"
+        loc = geolocator.geocode(f"{zip_code}, Texas")
+        if loc:
+            marker = dl.Marker(position=[loc.latitude, loc.longitude], children=dl.Tooltip(f"Zip: {zip_code}"))
+            return [loc.latitude, loc.longitude], 11, [marker]
+    except: pass
+    return [31.0, -99.0], 6, []
+
+@app.callback(
+    [Output("live-supply-curve", "figure"), Output("market-candlestick", "figure")],
+    Input("texas-map", "center")
+)
+def update_charts(center):
+    lat, lon = center
+    # 1. Supply Curve Logic
+    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=shortwave_radiation&timezone=auto"
+    r = requests.get(url).json()
+    df = pd.DataFrame({'time': pd.to_datetime(r['hourly']['time']), 'ghi': r['hourly']['shortwave_radiation']})
+    df['supply'] = (df['ghi'] * 60000 * 0.18) / 1000 # kW Conversion
+
+    fig_supply = go.Figure(go.Scatter(x=df['time'], y=df['supply'], fill='tozeroy', line=dict(color='#FFD700', width=3)))
+    fig_supply.update_layout(title="Predicted Solar Supply (kW)", template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(l=10, r=10, t=40, b=10))
+
+    # 2. Candlestick logic (Simulated Market Movement)
+    fig_candle = go.Figure(data=[go.Candlestick(
+        x=df['time'][:24],
+        open=df['supply'][:24]*1.1, high=df['supply'][:24]*1.3,
+        low=df['supply'][:24]*0.8, close=df['supply'][:24],
+        increasing_line_color='#00ff9d', decreasing_line_color='#ff3d3d'
+    )])
+    fig_candle.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis_rangeslider_visible=False, margin=dict(l=10, r=10, t=10, b=10))
+    
+    return fig_supply, fig_candle
+
+@app.callback(Output("solar-etf-mini", "figure"), Input("zip-btn", "n_clicks"))
+def update_etf(_):
+    data = yf.download("TAN", period="1mo")
+    if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
+    fig = go.Figure(go.Scatter(x=data.index, y=data['Close'], line=dict(color='#00d4ff')))
+    fig.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(l=0, r=0, t=0, b=0))
+    return fig
+
+@app.callback(Output("gemini-summary", "children"), Input("texas-map", "center"))
+def ai_report(center):
+    if not GEMINI_API_KEY: return "Key missing."
+    prompt = f"Summarize solar market at {center} for 2026. 2 sentences."
+    try:
+        r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}", 
+                          json={"contents": [{"parts": [{"text": prompt}]}]})
+        return r.json()['candidates'][0]['content']['parts'][0]['text']
+    except: return "AI currently busy."
 
 if __name__ == "__main__":
     app.run_server(debug=True)
