@@ -99,17 +99,24 @@ app.layout = html.Div([
     html.H2("Texas Solar Dashboard (ERCOT Zones)"),
 
     dl.Map(
-        id="map",
-        center=[31, -100],
-        zoom=6,
-        style={"height": "420px"},
-        click_lat_lng=None,
-        children=[
-            dl.TileLayer(),
-            dl.GeoJSON(data=ercot_zones, options=dict(style=zone_style)),
-            dl.Marker(id="marker")
-        ]
-    ),
+    id="map",
+    center=[31, -100],
+    zoom=6,
+    style={"height": "420px"},
+    click_lat_lng=None,
+    children=[
+        dl.TileLayer(),
+        dl.GeoJSON(
+            data=ercot_zones,
+            options=dict(style=zone_style)
+        ),
+        dl.Marker(
+            id="marker",
+            position=[30.26, -97.74]  # REQUIRED initial position
+        )
+    ]
+),
+
 
     html.Div([
         "Latitude:", dcc.Input(id="lat", value=30.26, type="number"),
