@@ -1,6 +1,6 @@
 dash>=3.0.0
 dash-bootstrap-components>=1.4.1
-dash-leaflet>=2.0.0
+dash-leaflet==0.1.0  # Older compatible version
 pandas>=2.0
 plotly>=5.20
 requests>=2.31
