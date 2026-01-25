@@ -4,191 +4,218 @@ import numpy as np
 import dash_bootstrap_components as dbc
 import dash_leaflet as dl
 import plotly.graph_objects as go
-import plotly.express as px
 from dash import Dash, html, dcc, Input, Output, State, exceptions, ctx
 from geopy.geocoders import Nominatim
 from datetime import datetime, timedelta
 from scipy.stats import norm, linregress
+from shapely.geometry import shape, Point
 import random
 
+# Initialize app with CYBORG foundation and Custom Logo Colors
+# LOGO COLORS: Yellow (#FFD700), Blue (#00CCFF), Green (#00FF66)
 app = Dash(__name__, external_stylesheets=[dbc.themes.CYBORG, dbc.icons.FONT_AWESOME])
 server = app.server
-geolocator = Nominatim(user_agent=f"specusol_full_twin_{random.randint(1000, 9999)}")
+geolocator = Nominatim(user_agent=f"specusol_leaders_v5_{random.randint(1000, 9999)}")
 
-# --- Data Assets ---
+# --- Technical Data Assets ---
 ENERGY_STOCKS = {
-    "TAN": {"name": "Invesco Solar ETF", "loc": "US-Mutual"},
-    "ENPH": {"name": "Enphase Energy", "loc": "US-Solar"},
-    "VLO": {"name": "Valero Energy", "loc": "Texas-Oil"},
-    "FSLR": {"name": "First Solar", "loc": "US-Solar"},
-    "WHD": {"name": "Cactus Inc.", "loc": "Texas-Equip"}
+    "TAN": {"name": "Invesco Solar ETF", "loc": "US Index / Mutual Fund"},
+    "ENPH": {"name": "Enphase Energy", "loc": "US Solar Tech"},
+    "VLO": {"name": "Valero Energy", "loc": "Texas Energy Giant"},
+    "FSLR": {"name": "First Solar", "loc": "US Manufacturer"},
+    "WHD": {"name": "Cactus Inc.", "loc": "Texas Equipment"}
 }
 
 ercot_zones = {"type": "FeatureCollection", "features": [
     {"type":"Feature","properties":{"zone":"North"}, "geometry":{"type":"Polygon","coordinates":[[[-103,36],[-94,36],[-94,33],[-103,33],[-103,36]]]}},
-    {"type":"Feature","properties":{"zone":"South"}, "geometry":{"type":"Polygon","coordinates":[[[-102,29],[-96,29],[-96,26],[-102,26],[-102,29]]]}}
+    {"type":"Feature","properties":{"zone":"South"}, "geometry":{"type":"Polygon","coordinates":[[[-102,29],[-96,29],[-96,26],[-102,26],[-102,29]]]}},
+    {"type":"Feature","properties":{"zone":"West"}, "geometry":{"type":"Polygon","coordinates":[[[-106,33],[-102,33],[-102,29],[-106,29],[-106,33]]]}},
+    {"type":"Feature","properties":{"zone":"Houston"}, "geometry":{"type":"Polygon","coordinates":[[[-96,31],[-94,31],[-94,29],[-96,29],[-96,31]]]}}
 ]}
 
-GLASS_STYLE = {"background": "rgba(255, 255, 255, 0.05)", "backdropFilter": "blur(10px)", "borderRadius": "15px", "border": "1px solid rgba(255, 255, 255, 0.1)", "padding": "20px", "marginBottom": "20px"}
+GLASS_STYLE = {"background": "rgba(255, 255, 255, 0.03)", "backdropFilter": "blur(12px)", "borderRadius": "15px", "border": "1px solid rgba(255, 255, 255, 0.1)", "padding": "20px", "marginBottom": "20px"}
 
 # --- Layout ---
-app.layout = dbc.Container(fluid=True, className="p-4", children=[
+app.layout = dbc.Container(fluid=True, className="p-4 bg-black text-white", children=[
+    # Header Section with Logo and Mission
     dbc.Row([
         dbc.Col([
-            html.H1(["SPECUSOL ", html.Span("PRO", className="text-warning")], className="fw-bold mb-0"),
-            html.P("Environmental & Financial Risk Intelligence", className="text-muted small")
-        ], width=7),
-        dbc.Col([
-            dbc.InputGroup([
-                dbc.Input(id="addr-input", placeholder="Enter Texas Address...", type="text", className="bg-dark text-white"),
-                dbc.Button("ANALYZE", id="addr-btn", color="warning"),
-            ])
-        ], width=5, className="align-self-center")
-    ], className="mb-4"),
-
-    dbc.Row([
-        # Main Column: Map and Technical Chart
-        dbc.Col([
             html.Div([
-                dl.Map(center=[31.0, -100.0], zoom=6, style={"height": "400px", "borderRadius": "12px"}, id="map", children=[
-                    dl.TileLayer(url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"),
-                    dl.GeoJSON(data=ercot_zones, style={"fillColor": "#1f77b4", "color": "white", "weight": 1, "fillOpacity": 0.15}),
-                    dl.LayerGroup(id="marker-layer")
-                ])
-            ], style=GLASS_STYLE),
-            html.Div([dcc.Graph(id="supply-demand-chart", style={"height": "400px"})], style=GLASS_STYLE)
-        ], lg=8),
-
-        # Sidebar: Environmental & Grid Risk
-        dbc.Col([
-            html.Div([
-                html.H6("ENVIRONMENTAL SIDEBAR", className="text-info fw-bold mb-3"),
-                html.Div([
-                    html.P("Carbon Intensity", className="text-muted small mb-0"),
-                    html.H4(id="carbon-intensity", className="text-success"),
-                    html.P("Grid Frequency", className="text-muted small mb-0"),
-                    html.H4(id="grid-freq", className="text-warning"),
-                    html.Hr(className="border-secondary"),
-                    html.Div(id="forecast-mini-cards")
-                ])
-            ], style=GLASS_STYLE),
-            
-            html.Div([
-                html.H6("FINANCIAL RISK (GREEKS)", className="text-info fw-bold mb-3"),
-                html.P("Option Delta (Hedge Ratio)", className="text-muted small mb-0"),
-                html.H4(id="option-delta", className="text-primary"),
-                html.P("Market Trend Confidence", className="text-muted small mb-0"),
-                html.H4(id="trend-confidence", className="text-info")
-            ], style=GLASS_STYLE)
-        ], lg=4)
+                html.H1(["SPECUSOL ", html.Span("PRO", className="text-warning")], className="fw-bold mb-0 display-4"),
+                html.H5("Live Solar Insights for Texas Energy Leaders", className="text-info opacity-75"),
+            ], className="text-center mb-4")
+        ], width=12)
     ]),
 
-    # Lower Row: Multi-Stock Analytics
+    dbc.Row([
+        # Left Side: Map and Sidebar
+        dbc.Col([
+            html.Div([
+                dl.Map(center=[31.0, -100.0], zoom=6, style={"height": "350px", "borderRadius": "12px"}, id="map", children=[
+                    dl.TileLayer(url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"),
+                    dl.GeoJSON(data=ercot_zones, id="ercot-layer", style={"fillColor": "#00CCFF", "color": "white", "weight": 1, "fillOpacity": 0.1}),
+                    dl.LayerGroup(id="marker-layer")
+                ]),
+                html.Div(id="ercot-notif", className="mt-2 text-warning fw-bold text-center")
+            ], style=GLASS_STYLE),
+
+            # ENVIRONMENTAL SIDEBAR
+            html.Div([
+                html.H6("ENVIRONMENTAL SIDEBAR", className="text-info fw-bold mb-3"),
+                dbc.Row([
+                    dbc.Col([
+                        html.P("Carbon Intensity", className="text-muted small mb-0"),
+                        html.H5("0.28 kg/kWh", className="text-success"),
+                        html.P("Grid Frequency", className="text-muted small mb-0"),
+                        html.H5("59.749 Hz", className="text-warning")
+                    ], width=6),
+                    dbc.Col([
+                        html.Small("CI = Base * (1 - S/D)", className="text-muted d-block mt-2"),
+                        html.Small("f = 60 + alpha(S-D)", className="text-muted d-block mt-3")
+                    ], width=6)
+                ]),
+                html.Div(id="forecast-mini-cards", className="mt-3")
+            ], style=GLASS_STYLE)
+        ], lg=4),
+
+        # Right Side: Supply/Demand FTC
+        dbc.Col([
+            html.Div([
+                dbc.InputGroup([
+                    dbc.Input(id="addr-input", placeholder="Texas Address...", type="text", className="bg-dark text-white"),
+                    dbc.Button("ANALYZE", id="addr-btn", color="warning"),
+                ], className="mb-3"),
+                dcc.Graph(id="supply-demand-chart", style={"height": "550px"})
+            ], style=GLASS_STYLE)
+        ], lg=8)
+    ]),
+
+    # Market Section
     dbc.Row([
         dbc.Col([
             html.Div([
+                html.H6("FINANCIAL RISK & MARKET OVERLAY", className="text-info fw-bold mb-3"),
                 dbc.Row([
                     dbc.Col([
-                        dcc.Dropdown(id="primary-stock", 
-                                     options=[{"label": f"{k} ({v['loc']})", "value": k} for k,v in ENERGY_STOCKS.items()], 
-                                     value="TAN", className="text-dark")
-                    ], width=4),
+                        html.P("Option Delta", className="text-muted small mb-0"),
+                        html.H4("0.336", className="text-primary"),
+                        html.P("Trend Confidence", className="text-muted small mb-0"),
+                        html.H4("79.53%", className="text-info")
+                    ], width=3),
                     dbc.Col([
-                        dbc.RadioItems(id="horizon", options=[{"label": i, "value": i} for i in ["1W", "1M", "1Y"]], 
-                                       value="1M", inline=True, className="text-warning")
-                    ], width=4),
+                        html.Label("Compare Solar Indexes & Stocks", className="text-muted small"),
+                        dcc.Checklist(
+                            id="stock-selector",
+                            options=[{"label": f" {k} ({v['loc']})", "value": k} for k, v in ENERGY_STOCKS.items()],
+                            value=["TAN"], className="text-white small", labelStyle={'display': 'block'}
+                        )
+                    ], width=5),
                     dbc.Col([
-                        dbc.Checklist(options=[{"label": "Best Fit Line", "value": "fit"}], value=[], id="toggle-fit", switch=True, className="text-success")
+                        html.Label("Technical Controls", className="text-muted small"),
+                        dbc.RadioItems(id="horizon", options=[{"label": i, "value": i} for i in ["1W", "1M", "1Y"]], value="1M", className="text-warning"),
+                        dbc.Checklist(options=[{"label": "Best Fit Line", "value": "fit"}], value=[], id="toggle-fit", switch=True, className="text-success mt-2")
                     ], width=4)
-                ], className="mb-3"),
+                ]),
                 dcc.Graph(id="market-comparison-graph", style={"height": "450px"})
             ], style=GLASS_STYLE)
         ], width=12)
     ]),
-    dcc.Store(id='coords-store', data={'lat': 30.26, 'lon': -97.74})
+
+    # Footer
+    html.Footer([
+        html.Hr(className="border-secondary"),
+        html.P("Specusol is an information service. Any insights are not intended to be investing advice and are for educational purposes only.", className="text-muted small text-center"),
+        html.P("© 2026 Specusol Intelligence | Texas Energy Leaders Edition", className="text-center text-muted small")
+    ], className="pb-4")
 ])
 
-# --- Mathematical Engine ---
+# --- Logic: Technical Engine ---
 
-def black_scholes_delta(S, K, T, r, sigma):
-    # Theoretical Hedge Ratio
-    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
-    return norm.cdf(d1)
-
-def get_simulated_market_data(symbol, horizon):
-    # Replaces unstable APIs with a stochastic geometric brownian motion model
-    points = {"1W": 168, "1M": 30, "1Y": 52}[horizon]
-    base_price = {"TAN": 50, "ENPH": 120, "VLO": 140, "FSLR": 160, "WHD": 50}[symbol]
-    
-    returns = np.random.normal(0.001, 0.02, points)
-    price_path = base_price * np.exp(np.cumsum(returns))
-    times = [datetime.now() - timedelta(hours=i if horizon=="1W" else i*24) for i in range(points)][::-1]
-    
-    return pd.DataFrame({'time': times, 'price': price_path})
-
-# --- Callbacks ---
+def get_daylight_curve(t_range):
+    # Daylight Hours: 7:30 (7.5) to 19:00 (19)
+    mu = 13.25 # Solar Noon
+    std = 2.5
+    bell = 1000 * np.exp(-0.5 * ((t_range - mu) / std) ** 2)
+    return bell
 
 @app.callback(
-    [Output("supply-demand-chart", "figure"), 
-     Output("carbon-intensity", "children"),
-     Output("grid-freq", "children")],
+    [Output("supply-demand-chart", "figure"), Output("ercot-notif", "children")],
     Input("coords-store", "data")
 )
-def update_environmental_twin(coords):
-    # Simulated Grid Model
-    t = np.linspace(0, 24, 24)
-    supply = 500 * np.maximum(0, np.sin((t-6)/12*np.pi))
-    demand = 400 + 100 * np.sin((t-16)/12*np.pi)
+def update_ftc_chart(coords):
+    t = np.linspace(0, 24, 100)
+    daylight = get_daylight_curve(t)
     
-    # 1. Carbon Calculation: CO2 avoided per kWh
-    ci_val = 0.45 * (1 - (np.mean(supply)/np.mean(demand)))
-    ci_text = f"{max(0, ci_val):.2f} kg/kWh"
+    # Residential vs Commercial Separated
+    res_supply = daylight * 0.4
+    comm_supply = daylight * 0.8
+    res_demand = 200 + 100 * np.sin((t-16)/12*np.pi)
+    comm_demand = 500 + 150 * np.sin((t-10)/12*np.pi)
     
-    # 2. Grid Frequency Simulation: Deviation from 60Hz
-    freq_dev = (np.mean(supply) - np.mean(demand)) / 1000
-    freq_text = f"{60.0 + freq_dev:.3f} Hz"
+    total_supply = res_supply + comm_supply
+    total_demand = res_demand + comm_demand
     
+    # Equilibrium Calculation (Finding where S approx D)
+    idx = np.argwhere(np.diff(np.sign(total_supply - total_demand))).flatten()
+    eq_text = ""
+    eq_pt = None
+    if len(idx) > 0:
+        eq_pt = t[idx[0]]
+        eq_val = total_supply[idx[0]]
+        eq_text = f"Equilibrium: {round(eq_val, 1)}kW @ {int(eq_pt)}:00"
+
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=t, y=supply, name="Solar Supply", fill='tozeroy', line=dict(color='orange')))
-    fig.add_trace(go.Scatter(x=t, y=demand, name="Grid Demand", line=dict(color='red', dash='dash')))
-    fig.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(l=0,r=0,t=30,b=0))
+    fig.add_trace(go.Scatter(x=t, y=res_supply, name="Res. Solar Supply", line=dict(color="#FFD700")))
+    fig.add_trace(go.Scatter(x=t, y=comm_supply, name="Comm. Solar Supply", line=dict(color="#FF8C00")))
+    fig.add_trace(go.Scatter(x=t, y=res_demand, name="Res. Grid Demand", line=dict(color="#00CCFF", dash="dash")))
+    fig.add_trace(go.Scatter(x=t, y=comm_demand, name="Comm. Grid Demand", line=dict(color="#0066FF", dash="dash")))
+    fig.add_trace(go.Scatter(x=t, y=daylight, name="Daylight Intensity (7:30-7)", line=dict(color="rgba(255,255,255,0.2)"), fill='tozeroy'))
+
+    if eq_pt:
+        fig.add_annotation(x=eq_pt, y=total_supply[idx[0]], text=f"EQ POINT: {round(total_supply[idx[0]],0)}kW", showarrow=True, arrowhead=1, bgcolor="green")
+
+    fig.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(l=0,r=0,t=30,b=0), title="FTC: Residential vs Commercial Grid Model")
     
-    return fig, ci_text, freq_text
+    # ERCOT Check
+    notif = "⚠️ Outside Primary ERCOT Reliability Zone"
+    p = Point(coords['lon'], coords['lat'])
+    for feat in ercot_zones['features']:
+        if shape(feat['geometry']).contains(p):
+            notif = f"✅ Verified ERCOT {feat['properties']['zone']} Zone"
+            break
+            
+    return fig, notif
 
 @app.callback(
-    [Output("market-comparison-graph", "figure"),
-     Output("option-delta", "children"),
-     Output("trend-confidence", "children")],
-    [Input("primary-stock", "value"), Input("horizon", "value"), Input("toggle-fit", "value")]
+    Output("market-comparison-graph", "figure"),
+    [Input("stock-selector", "value"), Input("horizon", "value"), Input("toggle-fit", "value")]
 )
-def update_financial_twin(symbol, horizon, toggle):
-    df = get_simulated_market_data(symbol, horizon)
-    S = df['price'].iloc[-1] # Current Price
-    
-    # Calculate Risk Analytics
-    delta = black_scholes_delta(S, S*1.05, 0.1, 0.04, 0.3)
-    
-    # Best Fit Line
-    x = np.arange(len(df))
-    slope, intercept, r_val, p_val, std_err = linregress(x, df['price'])
-    
+def update_market_overlay(stocks, horizon, fit):
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df['time'], y=df['price'], name=symbol, line=dict(color='#00CCFF', width=3)))
+    points = {"1W": 168, "1M": 30, "1Y": 52}[horizon]
     
-    if "fit" in toggle:
-        fig.add_trace(go.Scatter(x=df['time'], y=slope*x + intercept, name="Trend", line=dict(color='green', dash='dot')))
+    for symbol in stocks:
+        base = {"TAN": 50, "ENPH": 120, "VLO": 140, "FSLR": 160, "WHD": 50}[symbol]
+        y = base * np.exp(np.cumsum(np.random.normal(0.0005, 0.015, points)))
+        x = np.arange(points)
         
-    fig.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-    
-    return fig, f"{delta:.3f}", f"{r_val**2:.2%}"
+        fig.add_trace(go.Scatter(x=x, y=y, name=symbol, mode='lines'))
+        
+        if "fit" in fit and symbol == stocks[0]:
+            slope, intercept, r, p, std = linregress(x, y)
+            eq_label = f"y = {slope:.2f}x + {intercept:.2f}"
+            fig.add_trace(go.Scatter(x=x, y=slope*x + intercept, name=f"Fit: {symbol}", line=dict(dash='dot', color="green")))
+            fig.add_annotation(x=points//2, y=slope*(points//2)+intercept, text=eq_label, showarrow=False, font=dict(color="green"))
+
+    fig.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', title="Comparative Energy Equity Analysis")
+    return fig
 
 @app.callback(
     [Output("map", "viewport"), Output("marker-layer", "children"), Output("coords-store", "data")],
     [Input("addr-btn", "n_clicks"), Input("map", "clickData")],
     State("addr-input", "value"), prevent_initial_call=True
 )
-def sync_location(n, click, addr):
-    # (Same robust geocoding logic as before)
+def handle_geo(n, click, addr):
     if ctx.triggered_id == "addr-btn" and addr:
         try:
             loc = geolocator.geocode(addr, timeout=10)
