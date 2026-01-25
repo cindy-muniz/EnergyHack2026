@@ -1,6 +1,6 @@
 import os
+import requests
 import pandas as pd
-import yfinance as yf
 import numpy as np
 import dash_bootstrap_components as dbc
 import dash_leaflet as dl
@@ -8,11 +8,15 @@ import plotly.graph_objects as go
 from dash import Dash, html, dcc, Input, Output, State, exceptions, ctx
 from geopy.geocoders import Nominatim
 from datetime import datetime, timedelta
+import time
 import random
 
-# Initialize app with CYBORG theme
+# Initialize app
 app = Dash(__name__, external_stylesheets=[dbc.themes.CYBORG, dbc.icons.FONT_AWESOME])
 server = app.server
+
+# Finnhub Config
+FINNHUB_KEY = "KEY"
 
 # Geolocation setup
 ua_string = f"specusol_ftc_final_{random.randint(1000, 9999)}"
@@ -36,7 +40,7 @@ app.layout = dbc.Container(fluid=True, className="p-4", children=[
     dbc.Row([
         dbc.Col([
             html.H1(["SPECUSOL ", html.Span("PRO", className="text-warning")], className="fw-bold mb-0"),
-            html.P("Texas Solar Technical Model (FTC) & Environmental Intelligence", className="text-muted small")
+            html.P("Texas Solar Technical Model (FTC) & Finnhub Market Data", className="text-muted small")
         ], width=7),
         dbc.Col([
             dbc.InputGroup([
@@ -63,22 +67,22 @@ app.layout = dbc.Container(fluid=True, className="p-4", children=[
         ], lg=7, md=12)
     ]),
 
-    # Forecast & Efficiency Row
+    # Forecast Row
     dbc.Row([
         dbc.Col([
             html.Div([
                 html.H6("7-HOUR LOCALIZED FORECAST & SOLAR IRRADIANCE", className="text-info mb-3 fw-bold"),
                 dbc.Row(id="forecast-row", className="text-center g-2"),
-                # Green efficiency text added below forecast
                 html.Div(id="efficiency-text", className="text-success fw-bold mt-3 text-center", style={"fontSize": "1.1rem"})
             ], style=GLASS_STYLE)
         ], width=12)
     ]),
 
+    # Finnhub Candlestick Row
     dbc.Row([
         dbc.Col([
             html.Div([
-                html.H6("SOLAR TEXAS MUTUAL FUND (TAN) - 5D Market View", className="text-info mb-3 fw-bold"),
+                html.H6("SOLAR TEXAS MUTUAL FUND (TAN) - Finnhub 5D Candles", className="text-info mb-3 fw-bold"),
                 dcc.Graph(id="solar-etf", style={"height": "350px"})
             ], style=GLASS_STYLE)
         ], width=12)
@@ -86,7 +90,7 @@ app.layout = dbc.Container(fluid=True, className="p-4", children=[
     dcc.Store(id='coords-store', data={'lat': 30.26, 'lon': -97.74})
 ])
 
-# --- Logic: Model Restoration ---
+# --- Logic: Model Data ---
 
 def get_internal_model_data(lat, lon):
     now = datetime.now()
@@ -94,11 +98,9 @@ def get_internal_model_data(lat, lon):
     hours = np.array([t.hour for t in times])
     lat_factor = np.cos(np.radians(lat))
     
-    # Mathematical Irradiance Model (GHI in W/m2)
     ghi = np.maximum(0, 1000 * np.sin((hours - 6) / 12 * np.pi) * lat_factor)
     temp_sim = 20 + 10 * np.sin((hours - 14) / 12 * np.pi) - (lat - 30)
     
-    # Efficiency Model: Standard panel is ~22% at 25C; derates with heat
     eff_base = 0.225
     thermal_derating = np.where(temp_sim > 25, (temp_sim - 25) * 0.003, 0)
     actual_eff = eff_base - thermal_derating
@@ -110,6 +112,8 @@ def get_internal_model_data(lat, lon):
         'comm_demand': 700 + 300 * np.sin((hours - 11) / 12 * np.pi)
     })
     return df
+
+# --- Callbacks ---
 
 @app.callback(
     [Output("map", "viewport"), Output("marker-layer", "children"), Output("coords-store", "data")],
@@ -136,7 +140,50 @@ def update_location(n, clickData, address):
 def update_technical_data(coords):
     df = get_internal_model_data(coords['lat'], coords['lon'])
     
-    # Supply & Demand Trace (Plotly)
     fig_sd = go.Figure()
-    fig_sd.add_trace(go.Scatter(x=df['time'][:48], y=df['res_supply'][:48], name="Res. Supply (kW)", line=dict(color="orange", width=2)))
-    fig_sd.add_trace(go.Scatter(x
+    fig_sd.add_trace(go.Scatter(x=df['time'][:48], y=df['res_supply'][:48], name="Res. Supply", line=dict(color="orange", width=2)))
+    fig_sd.add_trace(go.Scatter(x=df['time'][:48], y=df['res_demand'][:48], name="Res. Demand", line=dict(color="red", dash="dash")))
+    fig_sd.add_trace(go.Scatter(x=df['time'][:48], y=df['comm_supply'][:48], name="Comm. Supply", line=dict(color="#00CCFF", width=2)))
+    fig_sd.add_trace(go.Scatter(x=df['time'][:48], y=df['comm_demand'][:48], name="Comm. Demand", line=dict(color="blue", dash="dash")))
+    
+    fig_sd.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(l=10,r=10,t=40,b=10), legend=dict(orientation="h", y=1.1))
+
+    forecast_cards = []
+    for i in range(7):
+        row = df.iloc[i]
+        icon = "fa-sun" if row['ghi'] > 10 else "fa-moon"
+        forecast_cards.append(dbc.Col(html.Div([
+            html.Small(row['time'].strftime("%I %p"), className="text-muted"),
+            html.H5(f"{round(row['temp'], 1)}°C", className="text-warning mt-1"),
+            html.Small(f"{int(row['ghi'])} W/m²", className="text-info d-block fw-bold"),
+            html.I(className=f"fas {icon} text-info")
+        ], className="p-2 border border-secondary rounded"), xs=4, md=True))
+    
+    current_eff = df.iloc[0]['eff'] * 100
+    eff_msg = f"Standard Panel Conversion Efficiency: {current_eff:.2f}% (Real-Time Thermal Adjustment)"
+    
+    return fig_sd, forecast_cards, eff_msg
+
+@app.callback(Output("solar-etf", "figure"), Input("coords-store", "data"))
+def update_etf(_):
+    try:
+        # Finnhub API requires UNIX timestamps
+        end = int(time.time())
+        start = end - (5 * 24 * 60 * 60) # 5 days ago
+        
+        url = f"https://finnhub.io/api/v1/stock/candle?symbol=TAN&resolution=60&from={start}&to={end}&token={FINNHUB_KEY}"
+        r = requests.get(url, timeout=10).json()
+        
+        if r['s'] == 'ok':
+            fig = go.Figure(go.Candlestick(
+                x=[datetime.fromtimestamp(t) for t in r['t']],
+                open=r['o'], high=r['h'], low=r['l'], close=r['c']
+            ))
+            fig.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis_rangeslider_visible=False, margin=dict(l=10,r=10,t=10,b=10))
+            return fig
+    except Exception as e:
+        print(f"Finnhub Error: {e}")
+    return go.Figure().update_layout(title="Market Data Error", template="plotly_dark")
+
+if __name__ == "__main__":
+    app.run_server(debug=True)
