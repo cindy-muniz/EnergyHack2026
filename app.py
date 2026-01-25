@@ -1,133 +1,172 @@
 import os
-import pandas as pd
-import yfinance as yf
 import requests
-from dash import Dash, dcc, html, Output, Input
+import yfinance as yf
+from dash import Dash, html, dcc, Input, Output
 import dash_bootstrap_components as dbc
 import dash_leaflet as dl
 import plotly.graph_objects as go
-import openai
 
-# --------------------------
-# Setup
-# --------------------------
+# ===============================
+# App setup
+# ===============================
 app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 server = app.server
 
-# Load environment variable for Gemini AI
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-openai.api_key = GEMINI_API_KEY
 
-# Example placeholder data for commercial/residential solar supply-demand
-# You would replace this with your real dataset
-data = pd.DataFrame({
-    "location": ["Austin", "Dallas", "Houston", "San Antonio"],
-    "commercial_supply": [200, 180, 220, 150],
-    "residential_supply": [120, 110, 150, 100],
-    "demand": [250, 210, 300, 180],
-    "TOU_price": [0.12, 0.11, 0.13, 0.10]
-})
+# ===============================
+# Static Texas solar data (safe)
+# ===============================
+SOLAR_DATA = {
+    "Austin": {
+        "lat": 30.27, "lon": -97.74,
+        "commercial": 220, "residential": 160,
+        "demand": 300, "tou": 0.14
+    },
+    "Dallas": {
+        "lat": 32.77, "lon": -96.79,
+        "commercial": 200, "residential": 140,
+        "demand": 280, "tou": 0.13
+    },
+    "Houston": {
+        "lat": 29.76, "lon": -95.37,
+        "commercial": 260, "residential": 180,
+        "demand": 340, "tou": 0.15
+    }
+}
 
-# Texas Map center
-texas_center = [31.0, -99.0]
-
-# --------------------------
+# ===============================
 # Layout
-# --------------------------
-app.layout = dbc.Container([
-    dbc.Row([
-        dbc.Col(html.H1("Specusol 🌞 Solar Analytics", className="text-center"), width=12)
-    ]),
+# ===============================
+app.layout = dbc.Container(fluid=True, children=[
+
+    html.H1("Specusol ☀️ Texas Solar Market Simulator", className="text-center my-3"),
+
     dbc.Row([
         dbc.Col([
-            html.H5("Texas Solar Map"),
-            dl.Map(center=texas_center, zoom=6, id="map", style={'width': '100%', 'height': '600px'},
-                   children=[
-                       dl.TileLayer(),
-                       dl.LayerGroup(id="marker-layer")
-                   ])
+            dl.Map(
+                center=[31.0, -99.0],
+                zoom=6,
+                style={"height": "600px"},
+                id="texas-map",
+                children=[
+                    dl.TileLayer(),
+                    dl.LayerGroup([
+                        dl.Marker(
+                            position=[v["lat"], v["lon"]],
+                            children=dl.Tooltip(k),
+                            id={"type": "city-marker", "city": k}
+                        ) for k, v in SOLAR_DATA.items()
+                    ])
+                ]
+            )
         ], width=6),
+
         dbc.Col([
-            html.H5("Dynamic Supply-Demand Chart"),
             dcc.Graph(id="supply-demand-chart")
         ], width=6)
     ]),
+
+    html.Hr(),
+
     dbc.Row([
         dbc.Col([
-            html.H5("Finances"),
-            dcc.Graph(id="solar-etf-chart"),
-            html.Div(id="gemini-summary", className="mt-3")
+            dcc.Graph(id="solar-etf")
         ], width=12)
     ]),
+
+    html.Hr(),
+
     dbc.Row([
         dbc.Col([
-            html.P("Disclaimer: This website is for informational purposes only. Not financial advice.", 
-                   className="text-muted mt-4")
-        ], width=12)
-    ])
-], fluid=True)
+            html.H4("Gemini AI – ERCOT Market Outlook"),
+            html.Div(id="gemini-summary", className="p-3 border")
+        ])
+    ]),
 
-# --------------------------
-# Callbacks
-# --------------------------
+    html.Hr(),
+
+    html.P(
+        "Specusol is an information service. Information is for educational purposes only and is not intended to be used as investment advice.",
+        className="text-muted text-center"
+    )
+])
+
+# ===============================
+# Supply/Demand Chart
+# ===============================
 @app.callback(
     Output("supply-demand-chart", "figure"),
-    Input("map", "click_lat_lng")
+    Input({"type": "city-marker", "city": Dash.ALL}, "n_clicks"),
+    prevent_initial_call=True
 )
-def update_chart(click_lat_lng):
-    # Default to Austin if no click
-    location = "Austin"
-    if click_lat_lng:
-        # Simple nearest-location matching
-        lat, lng = click_lat_lng
-        distances = ((data["location"].map(lambda x: x.lower()) - location.lower())**2).fillna(0)
-        # Fallback to first location
-        location = data["location"].iloc[0]
-
-    row = data[data["location"] == location].iloc[0]
+def update_chart(_):
+    ctx = Dash.callback_context
+    city = ctx.triggered[0]["prop_id"].split('"city":"')[1].split('"')[0]
+    d = SOLAR_DATA[city]
 
     fig = go.Figure()
-    fig.add_trace(go.Bar(name="Commercial Supply", x=["Supply"], y=[row["commercial_supply"]]))
-    fig.add_trace(go.Bar(name="Residential Supply", x=["Supply"], y=[row["residential_supply"]]))
-    fig.add_trace(go.Scatter(name="Demand", x=["Supply"], y=[row["demand"]], mode="lines+markers"))
-    fig.update_layout(title=f"{location} Solar Supply & Demand", barmode='group', yaxis_title="MW")
+    fig.add_bar(name="Commercial Supply", x=["Supply"], y=[d["commercial"]])
+    fig.add_bar(name="Residential Supply", x=["Supply"], y=[d["residential"]])
+    fig.add_scatter(name="Demand", x=["Supply"], y=[d["demand"]], mode="lines+markers")
+
+    fig.update_layout(
+        title=f"{city} Solar Supply vs Demand (TOU ${d['tou']}/kWh)",
+        barmode="group",
+        yaxis_title="MW"
+    )
     return fig
 
+# ===============================
+# Solar ETF Chart
+# ===============================
 @app.callback(
-    Output("solar-etf-chart", "figure"),
-    Input("solar-etf-chart", "id")
+    Output("solar-etf", "figure"),
+    Input("solar-etf", "id")
 )
-def update_etf_chart(_):
-    etf = yf.Ticker("TAN")  # Example Solar ETF
-    hist = etf.history(period="1y")
+def load_etf(_):
+    data = yf.download("TAN", period="1y")
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=hist.index, y=hist["Close"], mode="lines", name="TAN ETF"))
-    fig.update_layout(title="Solar ETF (TAN) Price", yaxis_title="USD")
+    fig.add_scatter(x=data.index, y=data["Close"], mode="lines")
+    fig.update_layout(title="Solar ETF (TAN)")
     return fig
 
+# ===============================
+# Gemini AI Summary (REST API)
+# ===============================
 @app.callback(
     Output("gemini-summary", "children"),
     Input("gemini-summary", "id")
 )
-def fetch_gemini_summary(_):
+def gemini_summary(_):
     if not GEMINI_API_KEY:
-        return "Gemini AI key not set."
-    try:
-        prompt = "Summarize the Texas solar market and recent trends in 3 bullet points."
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.5
-        )
-        summary = response.choices[0].message.content
-        return html.Ul([html.Li(line) for line in summary.split("\n") if line.strip()])
-    except Exception as e:
-        return f"Error fetching Gemini summary: {e}"
+        return "Gemini API key not set."
 
-# --------------------------
+    prompt = """
+Act as a Senior ERCOT Market Analyst and Energy Broker Advisor.
+Provide a concise Texas solar market outlook for 2026.
+"""
+
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}]
+    }
+
+    r = requests.post(
+        f"{url}?key={GEMINI_API_KEY}",
+        json=payload,
+        timeout=15
+    )
+
+    if r.status_code != 200:
+        return "Unable to retrieve Gemini summary."
+
+    text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+    return html.Pre(text)
+
+# ===============================
 # Run
-# --------------------------
+# ===============================
 if __name__ == "__main__":
-    app.run_server(debug=True)
-
+    app.run_server()
 
