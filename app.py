@@ -1,19 +1,18 @@
 import os
 import requests
 import pandas as pd
-import yfinance as yf
 import dash_bootstrap_components as dbc
 import dash_leaflet as dl
-import plotly.graph_objects as go
-import numpy as np
 from dash import Dash, html, dcc, Input, Output, State, exceptions
 from geopy.geocoders import Nominatim
 from datetime import datetime
+import random
 
-# Initialize app
 app = Dash(__name__, external_stylesheets=[dbc.themes.CYBORG, dbc.icons.FONT_AWESOME])
 server = app.server
-geolocator = Nominatim(user_agent="specusol_final_build_2026")
+
+ua_string = f"specusol_address_engine_{random.randint(1000, 9999)}"
+geolocator = Nominatim(user_agent=ua_string)
 
 GLASS_STYLE = {
     "background": "rgba(255, 255, 255, 0.05)",
@@ -28,136 +27,93 @@ app.layout = dbc.Container(fluid=True, className="p-4", children=[
     dbc.Row([
         dbc.Col([
             html.H1(["SPECUSOL ", html.Span("PRO", className="text-warning")], className="fw-bold mb-0"),
-            html.P("Texas Solar Supply & Weather Analytics", className="text-muted small")
-        ], width=8),
+            html.P("Texas Solar & Environmental Intelligence", className="text-muted small")
+        ], width=7),
         dbc.Col([
             dbc.InputGroup([
-                dbc.Input(id="zip-input", placeholder="Texas Zip...", type="text", className="bg-dark text-white"),
-                dbc.Button("ANALYZE", id="zip-btn", color="warning", className="fw-bold"),
+                dbc.Input(id="addr-input", placeholder="Enter full address...", type="text", className="bg-dark text-white"),
+                dbc.Button("LOCATE", id="addr-btn", color="warning", className="fw-bold"),
             ])
-        ], width=4, className="align-self-center")
+        ], width=5, className="align-self-center")
     ], className="mb-4"),
 
+    # Map Section
     dbc.Row([
         dbc.Col([
             html.Div([
-                dbc.Checklist(
-                    options=[{"label": "Show Weather Radar", "value": 1}],
-                    value=[], id="weather-toggle", switch=True,
-                    className="mb-2 text-info fw-bold" 
-                ),
-                dl.Map(center=[31.0, -99.0], zoom=6, style={"height": "450px", "borderRadius": "12px"}, id="texas-map", children=[
+                dl.Map(center=[31.0, -99.0], zoom=6, style={"height": "500px", "borderRadius": "12px"}, id="texas-map", children=[
                     dl.TileLayer(url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"),
-                    dl.LayerGroup(id="marker-layer"),
-                    dl.LayerGroup(id="weather-radar-layer")
+                    dl.LayerGroup(id="marker-layer")
                 ])
             ], style=GLASS_STYLE)
-        ], lg=5, md=12),
-
-        dbc.Col([
-            html.Div([
-                dcc.Graph(id="live-supply-demand", style={"height": "450px"})
-            ], style=GLASS_STYLE)
-        ], lg=7, md=12)
+        ], width=12)
     ]),
 
+    # Weather App Style Forecast Row
     dbc.Row([
         dbc.Col([
             html.Div([
-                html.H6("MARKET VOLATILITY (HOURLY OHLC)", className="text-warning mb-3 fw-bold"),
-                dcc.Graph(id="market-candlestick")
+                html.H6("7-HOUR LOCALIZED FORECAST", className="text-info mb-3 fw-bold"),
+                dbc.Row(id="forecast-row", className="text-center g-2")
             ], style=GLASS_STYLE)
-        ], lg=8, md=12),
-        
-        dbc.Col([
-            html.Div([
-                html.H6("SOLAR TEXAS MUTUAL FUND (TAN)", className="text-info mb-3 fw-bold"),
-                dcc.Graph(id="solar-etf-mini", style={"height": "320px"})
-            ], style=GLASS_STYLE)
-        ], lg=4, md=12)
+        ], width=12)
     ]),
     
     dcc.Store(id='coords-store', data={'lat': 31.0, 'lon': -99.0})
 ])
 
-def get_mock_data():
-    times = pd.date_range(start=datetime.now(), periods=24, freq='H')
-    return pd.DataFrame({
-        'time': times,
-        'supply_mw': [max(0, 40 * np.sin((i-6) * np.pi / 12)) for i in range(24)],
-        'demand_mw': [45 + 15 * np.sin((i-10) * np.pi / 12) for i in range(24)]
-    })
+# --- Callbacks ---
 
 @app.callback(
     [Output("texas-map", "viewport"), Output("marker-layer", "children"), Output("coords-store", "data")],
-    Input("zip-btn", "n_clicks"),
-    State("zip-input", "value"),
+    Input("addr-btn", "n_clicks"),
+    State("addr-input", "value"),
     prevent_initial_call=True
 )
-def update_map(n, zip_code):
-    if not zip_code:
+def geocode_address(n, address):
+    if not address:
         raise exceptions.PreventUpdate
     try:
-        loc = geolocator.geocode(f"{zip_code}, Texas", timeout=10)
+        # Improved search logic for full addresses
+        loc = geolocator.geocode(address, timeout=10)
         if loc:
-            viewport = {"center": [loc.latitude, loc.longitude], "zoom": 10, "transition": "flyTo"}
-            marker = [dl.Marker(position=[loc.latitude, loc.longitude])]
-            coords = {'lat': loc.latitude, 'lon': loc.longitude}
-            return viewport, marker, coords
-    except:
-        pass
+            viewport = {"center": [loc.latitude, loc.longitude], "zoom": 14, "transition": "flyTo"}
+            marker = [dl.Marker(position=[loc.latitude, loc.longitude], children=dl.Tooltip(address))]
+            return viewport, marker, {'lat': loc.latitude, 'lon': loc.longitude}
+    except Exception as e:
+        print(f"Geocoding Error: {e}")
     return {"center": [31.0, -99.0], "zoom": 6}, [], {'lat': 31.0, 'lon': -99.0}
 
 @app.callback(
-    Output("weather-radar-layer", "children"),
-    Input("weather-toggle", "value")
-)
-def toggle_radar(checked):
-    if checked:
-        return [dl.TileLayer(url="https://tilecache.rainviewer.com/v2/radar/nowcast_5m/256/{z}/{x}/{y}/2/1_1.png", opacity=0.5)]
-    return []
-
-@app.callback(
-    [Output("live-supply-demand", "figure"), Output("market-candlestick", "figure")],
+    Output("forecast-row", "children"),
     Input("coords-store", "data")
 )
-def update_charts(coords):
-    df = get_mock_data()
+def update_forecast(coords):
     try:
-        api_url = f"https://api.open-meteo.com/v1/forecast?latitude={coords['lat']}&longitude={coords['lon']}&hourly=shortwave_radiation&timezone=auto"
-        r = requests.get(api_url, timeout=5).json()
-        if 'hourly' in r:
-            # Re-written line to avoid any potential syntax confusion
-            hourly_time = pd.to_datetime(r['hourly']['time'][:24])
-            hourly_supply = np.array(r['hourly']['shortwave_radiation'][:24]) * 0.12
-            df = pd.DataFrame({'time': hourly_time, 'supply_mw': hourly_supply})
-            df['demand_mw'] = [45 + 15 * np.sin((i-10) * np.pi / 12) for i in range(24)]
-    except:
-        pass
-
-    fig_sd = go.Figure()
-    fig_sd.add_trace(go.Scatter(x=df['time'], y=df['supply_mw'], name="Supply", fill='tozeroy', line=dict(color='#FFD700')))
-    fig_sd.add_trace(go.Scatter(x=df['time'], y=df['demand_mw'], name="Demand", line=dict(color='#00FFCC', dash='dash')))
-    fig_sd.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(l=10,r=10,t=30,b=10))
-
-    fig_ohlc = go.Figure(data=[go.Candlestick(x=df['time'], open=df['supply_mw']*0.9, high=df['supply_mw']*1.1, low=df['supply_mw']*0.8, close=df['supply_mw'])])
-    fig_ohlc.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis_rangeslider_visible=False)
-    
-    return fig_sd, fig_ohlc
-
-@app.callback(Output("solar-etf-mini", "figure"), Input("zip-btn", "n_clicks"))
-def update_etf(_):
-    fig = go.Figure().update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)')
-    try:
-        data = yf.download("TAN", period="1mo", progress=False)
-        if not data.empty:
-            if isinstance(data.columns, pd.MultiIndex):
-                data.columns = data.columns.get_level_values(0)
-            fig = go.Figure(go.Scatter(x=data.index, y=data['Close'], fill='tozeroy', line=dict(color='#00CCFF')))
-    except:
-        pass
-    fig.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(l=10,r=10,t=10,b=10))
-    return fig
+        url = f"https://api.open-meteo.com/v1/forecast?latitude={coords['lat']}&longitude={coords['lon']}&hourly=temperature_2m,weathercode&timezone=auto"
+        r = requests.get(url, timeout=5).json()
+        
+        forecast_cards = []
+        # Get the next 7 hours
+        for i in range(7):
+            temp = r['hourly']['temperature_2m'][i]
+            time_raw = r['hourly']['time'][i]
+            time_obj = datetime.strptime(time_raw, "%Y-%m-%dT%H:%M")
+            time_str = time_obj.strftime("%I %p")
+            
+            card = dbc.Col([
+                html.Div([
+                    html.Small(time_str, className="text-muted d-block"),
+                    html.H4(f"{temp}°C", className="text-warning my-2"),
+                    html.I(className="fas fa-cloud text-info") # Simple placeholder icon
+                ], className="p-3 border border-secondary rounded")
+            ], xs=4, md=True)
+            forecast_cards.append(card)
+        
+        return forecast_cards
+    except Exception as e:
+        print(f"Forecast Error: {e}")
+        return [html.P("Forecast data unavailable for this location.", className="text-muted")]
 
 if __name__ == "__main__":
     app.run_server(debug=True)
