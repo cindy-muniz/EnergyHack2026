@@ -6,4 +6,5 @@ requests
 geopy
 numpy
 scipy
+shapely
 gunicorn
