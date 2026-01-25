@@ -1,101 +1,136 @@
 import dash
-import dash_core_components as dcc
-import dash_html_components as html
+from dash import dcc, html
 import dash_bootstrap_components as dbc
-from dash.dependencies import Input, Output
-import plotly.graph_objects as go
 import dash_leaflet as dl
+import plotly.graph_objs as go
+import pandas as pd
 import requests
+import openai
+import yfinance as yf
+from dash.dependencies import Input, Output
 import json
 
-# Initialize the Dash app
+# Initialize the app
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
-# Layout for the webpage
+# Your OpenAI API Key (use environment variables for better security)
+openai.api_key = 'your-openai-api-key-here'
+
+# Sample map data (replace with your actual data and coordinates)
+map_data = [
+    {"name": "ERCOT Zone 1", "lat": 30.0, "lon": -97.0},
+    {"name": "ERCOT Zone 2", "lat": 31.0, "lon": -98.0},
+    {"name": "ERCOT Zone 3", "lat": 32.0, "lon": -99.0}
+]
+
+# Sample weather data (replace with your actual weather API call)
+weather_data = [
+    {"name": "ERCOT Zone 1", "temperature": 22.5, "wind_speed": 10, "lat": 30.0, "lon": -97.0},
+    {"name": "ERCOT Zone 2", "temperature": 23.1, "wind_speed": 12, "lat": 31.0, "lon": -98.0},
+    {"name": "ERCOT Zone 3", "temperature": 21.8, "wind_speed": 8, "lat": 32.0, "lon": -99.0}
+]
+
+# Placeholder for solar data (replace with actual supply/demand data)
+supply_demand_data = pd.DataFrame({
+    'time': pd.date_range(start='2023-01-01', periods=24, freq='H'),
+    'residential_demand': [200 + i * 2 for i in range(24)],
+    'commercial_demand': [500 + i * 3 for i in range(24)],
+    'solar_supply': [300 + i * 4 for i in range(24)],
+    'equilibrium': [350 + i * 2 for i in range(24)],
+    'TOU_pricing': [0.12 + i * 0.001 for i in range(24)]
+})
+
+# Layout with map on the left, chart on the right
 app.layout = html.Div([
     dbc.Row([
-        # Left column: Map with weather overlay
+        # Map section (Left side)
         dbc.Col([
-            dl.Map(
-                [dl.TileLayer(), 
-                 dl.MarkerClusterGroup(id="markers")],
-                id="map", 
-                center=[40.7128, -74.0060],  # Default location (New York)
-                zoom=5,
-                style={'width': '100%', 'height': '500px'}
-            )
+            dl.Map([
+                dl.TileLayer(),
+                dl.LayerGroup(id="weather-layer"),
+                dl.MarkerCluster([
+                    dl.Marker(position=(zone["lat"], zone["lon"]), children=[
+                        dl.Tooltip(zone["name"])
+                    ]) for zone in map_data
+                ])
+            ], id="map", style={'height': '500px'}),
         ], width=6),
 
-        # Right column: Chart
+        # Chart section (Right side)
         dbc.Col([
-            dcc.Graph(id="supply-demand-chart"),
-            html.Div(id="gemini-summary", style={'margin-top': '20px'}),
+            dcc.Graph(id='supply-demand-chart'),
+            html.Div(id='gemini-summary')
         ], width=6)
     ])
 ])
 
-# Callback to update the chart and weather data based on map click
+# Callback to overlay weather data on the map
 @app.callback(
-    [Output("supply-demand-chart", "figure"),
-     Output("gemini-summary", "children"),
-     Output("markers", "children")],
-    [Input("map", "click_lat_lng")]
+    Output('weather-layer', 'children'),
+    Input('map', 'click_lat_lng')
 )
-def update_content(latlng):
-    if latlng is None:
-        return go.Figure(), "", []
+def update_weather_on_map(click_lat_lng):
+    weather_markers = []
+    
+    # Filter weather data based on the clicked coordinates
+    if click_lat_lng:
+        clicked_lat, clicked_lon = click_lat_lng
+        for data in weather_data:
+            if abs(data['lat'] - clicked_lat) < 1 and abs(data['lon'] - clicked_lon) < 1:
+                weather_markers.append(
+                    dl.Marker(position=(data['lat'], data['lon']), children=[
+                        dl.Tooltip(f"Temp: {data['temperature']}°C, Wind: {data['wind_speed']} km/h")
+                    ])
+                )
+    return weather_markers
 
-    lat, lng = latlng
+# Callback to update chart when clicking on the map
+@app.callback(
+    Output('supply-demand-chart', 'figure'),
+    Input('map', 'click_lat_lng')
+)
+def update_chart(click_lat_lng):
+    # If a map location is clicked, filter supply and demand data accordingly
+    if click_lat_lng:
+        clicked_lat, clicked_lon = click_lat_lng
+        zone = next((zone for zone in map_data if abs(zone['lat'] - clicked_lat) < 1 and abs(zone['lon'] - clicked_lon) < 1), None)
+        if zone:
+            # Filter supply/demand data (this is a simple placeholder, adapt it as needed)
+            supply_demand_data_filtered = supply_demand_data
+            figure = {
+                'data': [
+                    go.Scatter(x=supply_demand_data_filtered['time'], y=supply_demand_data_filtered['residential_demand'], mode='lines', name='Residential Demand'),
+                    go.Scatter(x=supply_demand_data_filtered['time'], y=supply_demand_data_filtered['commercial_demand'], mode='lines', name='Commercial Demand'),
+                    go.Scatter(x=supply_demand_data_filtered['time'], y=supply_demand_data_filtered['solar_supply'], mode='lines', name='Solar Supply'),
+                    go.Scatter(x=supply_demand_data_filtered['time'], y=supply_demand_data_filtered['equilibrium'], mode='lines', name='Equilibrium'),
+                    go.Scatter(x=supply_demand_data_filtered['time'], y=supply_demand_data_filtered['TOU_pricing'], mode='lines', name='TOU Pricing'),
+                ],
+                'layout': go.Layout(title=f"Supply and Demand for {zone['name']}", xaxis={'title': 'Time'}, yaxis={'title': 'MW / Pricing'}),
+            }
+            return figure
+    return {}
 
-    # Example: Fetch data for the clicked location
-    chart_data = get_supply_demand_data(lat, lng)
-    weather_data = get_weather_data(lat, lng)
-    gemini_summary = get_gemini_ai_summary()
+# Callback to fetch Gemini AI summary
+@app.callback(
+    Output('gemini-summary', 'children'),
+    Input('map', 'click_lat_lng')
+)
+def fetch_gemini_summary(click_lat_lng):
+    if click_lat_lng:
+        response = openai.Completion.create(
+            model="text-davinci-003",
+            prompt="Summarize the latest data on the solar energy market and trends for investment.",
+            temperature=0.5,
+            max_tokens=100
+        )
+        return html.Div([
+            html.H5("Gemini AI Summary:"),
+            html.P(response.choices[0].text.strip())
+        ])
+    return "Select a location on the map to get the summary."
 
-    # Create the supply-demand chart
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=chart_data['time'], y=chart_data['residential_demand'], mode='lines', name='Residential Demand'))
-    fig.add_trace(go.Scatter(x=chart_data['time'], y=chart_data['commercial_demand'], mode='lines', name='Commercial Demand'))
-    fig.add_trace(go.Scatter(x=chart_data['time'], y=chart_data['equilibrium'], mode='lines', name='Equilibrium'))
-    fig.update_layout(title="Supply & Demand vs. Equilibrium", xaxis_title="Time", yaxis_title="MW")
-
-    # Update the Gemini AI summary
-    gemini_text = f"Gemini AI Analysis: {gemini_summary}"
-
-    # Update weather markers on the map
-    markers = [dl.Marker(position=[lat, lng], children=[dl.Popup(f"Weather: {weather_data['description']}")])]
-
-    return fig, gemini_text, markers
-
-
-# Function to fetch supply & demand data (example)
-def get_supply_demand_data(lat, lng):
-    # This is a placeholder. Replace with your API or data-fetching logic.
-    return {
-        "time": [0, 1, 2, 3, 4, 5],
-        "residential_demand": [100, 120, 110, 130, 140, 150],
-        "commercial_demand": [50, 55, 60, 65, 70, 75],
-        "equilibrium": [80, 85, 90, 95, 100, 105]
-    }
-
-
-# Function to fetch weather data (example)
-def get_weather_data(lat, lng):
-    # Replace with an actual weather API
-    weather_response = {
-        "description": "Clear sky",
-        "temperature": "25°C",
-    }
-    return weather_response
-
-
-# Function to fetch Gemini AI summary (example)
-def get_gemini_ai_summary():
-    # Replace with the actual API call
-    summary_response = "Gemini AI predicts an upward trend in solar production with higher demand in the coming months."
-    return summary_response
-
-
+# Run the app
 if __name__ == '__main__':
     app.run_server(debug=True)
+
 
