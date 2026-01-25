@@ -11,11 +11,20 @@ import plotly.graph_objects as go
 ercot_zones = {
     "type": "FeatureCollection",
     "features": [
-        {"type": "Feature","properties":{"zone":"North"},"geometry":{"type":"Polygon","coordinates":[[[-103,36],[-94,36],[-94,33],[-103,33],[-103,36]]]}},
-        {"type": "Feature","properties":{"zone":"South"},"geometry":{"type":"Polygon","coordinates":[[[-102,29],[-96,29],[-96,26],[-102,26],[-102,29]]]}},
-        {"type": "Feature","properties":{"zone":"West"},"geometry":{"type":"Polygon","coordinates":[[[-106,33],[-102,33],[-102,29],[-106,29],[-106,33]]]}},
-        {"type": "Feature","properties":{"zone":"Houston"},"geometry":{"type":"Polygon","coordinates":[[[-96,31],[-94,31],[-94,29],[-96,29],[-96,31]]]}},
-        {"type": "Feature","properties":{"zone":"Coastal"},"geometry":{"type":"Polygon","coordinates":[[[-98,29],[-94,29],[-94,26],[-98,26],[-98,29]]]}}
+        {"type":"Feature","properties":{"zone":"North"},
+         "geometry":{"type":"Polygon","coordinates":[[[-103,36],[-94,36],[-94,33],[-103,33],[-103,36]]]}},
+
+        {"type":"Feature","properties":{"zone":"South"},
+         "geometry":{"type":"Polygon","coordinates":[[[-102,29],[-96,29],[-96,26],[-102,26],[-102,29]]]}},
+
+        {"type":"Feature","properties":{"zone":"West"},
+         "geometry":{"type":"Polygon","coordinates":[[[-106,33],[-102,33],[-102,29],[-106,29],[-106,33]]]}},
+
+        {"type":"Feature","properties":{"zone":"Houston"},
+         "geometry":{"type":"Polygon","coordinates":[[[-96,31],[-94,31],[-94,29],[-96,29],[-96,31]]]}},
+
+        {"type":"Feature","properties":{"zone":"Coastal"},
+         "geometry":{"type":"Polygon","coordinates":[[[-98,29],[-94,29],[-94,26],[-98,26],[-98,29]]]}}
     ]
 }
 
@@ -36,16 +45,16 @@ def zone_style(feature):
     }
 
 # ------------------------------
-# DATA
+# SOLAR SUPPLY MODEL
 # ------------------------------
 def get_solar_supply(lat, lon):
     timestamps = pd.date_range(datetime.now(), periods=168, freq="h")
 
     ghi = np.maximum(0, 1000 * np.sin((timestamps.hour - 6) / 12 * np.pi))
-    cloud = 1 - np.random.uniform(0, 0.25, len(timestamps))
+    cloud_factor = 1 - np.random.uniform(0, 0.25, len(timestamps))
 
-    res_kw = ghi * cloud * (10000 * 0.18 / 1000)
-    comm_kw = ghi * cloud * (50000 * 0.18 * 0.75 / 1000)
+    res_kw = ghi * cloud_factor * (10000 * 0.18 / 1000)
+    comm_kw = ghi * cloud_factor * (50000 * 0.18 * 0.75 / 1000)
 
     return pd.DataFrame({
         "timestamp": timestamps,
@@ -53,6 +62,9 @@ def get_solar_supply(lat, lon):
         "comm_supply": comm_kw
     })
 
+# ------------------------------
+# FIGURE BUILDER
+# ------------------------------
 def build_figure(lat, lon):
     df = get_solar_supply(lat, lon)
 
@@ -60,7 +72,7 @@ def build_figure(lat, lon):
     comm_demand = df.comm_supply * np.random.uniform(0.7, 1.0, len(df))
 
     hour = df.timestamp.dt.hour
-    price = np.select(
+    tou_price = np.select(
         [hour < 6, hour < 14, hour < 20, hour < 22],
         [0.07, 0.11, 0.22, 0.13],
         default=0.07
@@ -68,13 +80,28 @@ def build_figure(lat, lon):
 
     fig = go.Figure()
 
-    fig.add_trace(go.Scatter(df.timestamp, df.res_supply, name="Residential Supply"))
-    fig.add_trace(go.Scatter(df.timestamp, res_demand, name="Residential Demand", dash="dash"))
-    fig.add_trace(go.Scatter(df.timestamp, df.comm_supply, name="Commercial Supply"))
-    fig.add_trace(go.Scatter(df.timestamp, comm_demand, name="Commercial Demand", dash="dash"))
+    fig.add_trace(go.Scatter(
+        x=df.timestamp, y=df.res_supply,
+        name="Residential Supply", line=dict(color="orange")
+    ))
 
     fig.add_trace(go.Scatter(
-        df.timestamp, price,
+        x=df.timestamp, y=res_demand,
+        name="Residential Demand", line=dict(color="red", dash="dash")
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=df.timestamp, y=df.comm_supply,
+        name="Commercial Supply", line=dict(color="blue")
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=df.timestamp, y=comm_demand,
+        name="Commercial Demand", line=dict(color="navy", dash="dash")
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=df.timestamp, y=tou_price,
         name="TOU Price ($/kWh)",
         yaxis="y2",
         line=dict(color="black")
@@ -82,8 +109,13 @@ def build_figure(lat, lon):
 
     fig.update_layout(
         title=f"Texas Solar Supply, Demand & TOU Pricing<br>LAT={lat:.3f}, LON={lon:.3f}",
+        xaxis_title="Time",
         yaxis=dict(title="Power (kW)"),
-        yaxis2=dict(title="Price ($/kWh)", overlaying="y", side="right"),
+        yaxis2=dict(
+            title="Price ($/kWh)",
+            overlaying="y",
+            side="right"
+        ),
         template="plotly_white",
         legend=dict(orientation="h")
     )
@@ -91,7 +123,7 @@ def build_figure(lat, lon):
     return fig
 
 # ------------------------------
-# APP
+# DASH APP
 # ------------------------------
 app = Dash(__name__)
 
@@ -99,28 +131,22 @@ app.layout = html.Div([
     html.H2("Texas Solar Dashboard (ERCOT Zones)"),
 
     dl.Map(
-    id="map",
-    center=[31, -100],
-    zoom=6,
-    style={"height": "420px"},
-    click_lat_lng=None,
-    children=[
-        dl.TileLayer(),
-        dl.GeoJSON(
-            data=ercot_zones,
-            options=dict(style=zone_style)
-        ),
-        dl.Marker(
-            id="marker",
-            position=[30.26, -97.74]  # REQUIRED initial position
-        )
-    ]
-),
-
+        id="map",
+        center=[31, -100],
+        zoom=6,
+        style={"height": "420px"},
+        children=[
+            dl.TileLayer(),
+            dl.GeoJSON(data=ercot_zones, options=dict(style=zone_style)),
+            dl.Marker(id="marker", position=[30.26, -97.74])
+        ]
+    ),
 
     html.Div([
-        "Latitude:", dcc.Input(id="lat", value=30.26, type="number"),
-        "Longitude:", dcc.Input(id="lon", value=-97.74, type="number"),
+        "Latitude:",
+        dcc.Input(id="lat", value=30.26, type="number", step=0.001),
+        "Longitude:",
+        dcc.Input(id="lon", value=-97.74, type="number", step=0.001)
     ], style={"marginTop": "10px"}),
 
     dcc.Graph(id="chart")
@@ -133,12 +159,16 @@ app.layout = html.Div([
     Output("lat", "value"),
     Output("lon", "value"),
     Output("marker", "position"),
-    Input("map", "click_lat_lng")
+    Input("map", "clickData")
 )
-def update_coords(click):
-    if click is None:
-        return 30.26, -97.74, [30.26, -97.74]
-    return click[0], click[1], click
+def update_coords(clickData):
+    if clickData is None:
+        lat, lon = 30.26, -97.74
+        return lat, lon, [lat, lon]
+
+    lat = clickData["latlng"]["lat"]
+    lon = clickData["latlng"]["lng"]
+    return lat, lon, [lat, lon]
 
 @app.callback(
     Output("chart", "figure"),
@@ -153,5 +183,4 @@ def update_chart(lat, lon):
 # ------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8050)
-
 
