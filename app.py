@@ -1,71 +1,21 @@
-# ------------------------------
-# app.py — Texas Solar Dashboard (ERCOT Zones)
-# ------------------------------
-
 from dash import Dash, html, dcc, Input, Output
 import dash_leaflet as dl
-import dash_leaflet.express as dlx
 import pandas as pd
 import numpy as np
 from datetime import datetime
 import plotly.graph_objects as go
 
 # ------------------------------
-# ERCOT ZONE GEOJSON (SIMPLIFIED)
+# ERCOT ZONES (SIMPLIFIED)
 # ------------------------------
 ercot_zones = {
     "type": "FeatureCollection",
     "features": [
-        {
-            "type": "Feature",
-            "properties": {"zone": "North"},
-            "geometry": {
-                "type": "Polygon",
-                "coordinates": [[
-                    [-103, 36], [-94, 36], [-94, 33], [-103, 33], [-103, 36]
-                ]]
-            }
-        },
-        {
-            "type": "Feature",
-            "properties": {"zone": "South"},
-            "geometry": {
-                "type": "Polygon",
-                "coordinates": [[
-                    [-102, 29], [-96, 29], [-96, 26], [-102, 26], [-102, 29]
-                ]]
-            }
-        },
-        {
-            "type": "Feature",
-            "properties": {"zone": "West"},
-            "geometry": {
-                "type": "Polygon",
-                "coordinates": [[
-                    [-106, 33], [-102, 33], [-102, 29], [-106, 29], [-106, 33]
-                ]]
-            }
-        },
-        {
-            "type": "Feature",
-            "properties": {"zone": "Houston"},
-            "geometry": {
-                "type": "Polygon",
-                "coordinates": [[
-                    [-96, 31], [-94, 31], [-94, 29], [-96, 29], [-96, 31]
-                ]]
-            }
-        },
-        {
-            "type": "Feature",
-            "properties": {"zone": "Coastal"},
-            "geometry": {
-                "type": "Polygon",
-                "coordinates": [[
-                    [-98, 29], [-94, 29], [-94, 26], [-98, 26], [-98, 29]
-                ]]
-            }
-        }
+        {"type": "Feature","properties":{"zone":"North"},"geometry":{"type":"Polygon","coordinates":[[[-103,36],[-94,36],[-94,33],[-103,33],[-103,36]]]}},
+        {"type": "Feature","properties":{"zone":"South"},"geometry":{"type":"Polygon","coordinates":[[[-102,29],[-96,29],[-96,26],[-102,26],[-102,29]]]}},
+        {"type": "Feature","properties":{"zone":"West"},"geometry":{"type":"Polygon","coordinates":[[[-106,33],[-102,33],[-102,29],[-106,29],[-106,33]]]}},
+        {"type": "Feature","properties":{"zone":"Houston"},"geometry":{"type":"Polygon","coordinates":[[[-96,31],[-94,31],[-94,29],[-96,29],[-96,31]]]}},
+        {"type": "Feature","properties":{"zone":"Coastal"},"geometry":{"type":"Polygon","coordinates":[[[-98,29],[-94,29],[-94,26],[-98,26],[-98,29]]]}}
     ]
 }
 
@@ -82,11 +32,11 @@ def zone_style(feature):
         "fillColor": zone_colors.get(feature["properties"]["zone"], "gray"),
         "color": "black",
         "weight": 1,
-        "fillOpacity": 0.25
+        "fillOpacity": 0.3
     }
 
 # ------------------------------
-# DATA GENERATION
+# DATA
 # ------------------------------
 def get_solar_supply(lat, lon):
     timestamps = pd.date_range(datetime.now(), periods=168, freq="h")
@@ -106,28 +56,25 @@ def get_solar_supply(lat, lon):
 def build_figure(lat, lon):
     df = get_solar_supply(lat, lon)
 
-    res_demand = df["res_supply"] * np.random.uniform(0.7, 1.0, len(df))
-    comm_demand = df["comm_supply"] * np.random.uniform(0.7, 1.0, len(df))
+    res_demand = df.res_supply * np.random.uniform(0.7, 1.0, len(df))
+    comm_demand = df.comm_supply * np.random.uniform(0.7, 1.0, len(df))
 
-    hour = df["timestamp"].dt.hour
-    base_price = np.select(
-        [(hour < 6), (hour < 14), (hour < 20), (hour < 22)],
+    hour = df.timestamp.dt.hour
+    price = np.select(
+        [hour < 6, hour < 14, hour < 20, hour < 22],
         [0.07, 0.11, 0.22, 0.13],
         default=0.07
     )
 
-    df["price"] = np.clip(base_price + np.random.normal(0, 0.005, len(df)), 0.05, 0.30)
-
     fig = go.Figure()
 
-    fig.add_trace(go.Scatter(df.timestamp, df.res_supply, name="Residential Supply", line=dict(color="orange")))
-    fig.add_trace(go.Scatter(df.timestamp, res_demand, name="Residential Demand", line=dict(color="red", dash="dash")))
-
-    fig.add_trace(go.Scatter(df.timestamp, df.comm_supply, name="Commercial Supply", line=dict(color="blue")))
-    fig.add_trace(go.Scatter(df.timestamp, comm_demand, name="Commercial Demand", line=dict(color="navy", dash="dash")))
+    fig.add_trace(go.Scatter(df.timestamp, df.res_supply, name="Residential Supply"))
+    fig.add_trace(go.Scatter(df.timestamp, res_demand, name="Residential Demand", dash="dash"))
+    fig.add_trace(go.Scatter(df.timestamp, df.comm_supply, name="Commercial Supply"))
+    fig.add_trace(go.Scatter(df.timestamp, comm_demand, name="Commercial Demand", dash="dash"))
 
     fig.add_trace(go.Scatter(
-        df.timestamp, df.price,
+        df.timestamp, price,
         name="TOU Price ($/kWh)",
         yaxis="y2",
         line=dict(color="black")
@@ -144,26 +91,24 @@ def build_figure(lat, lon):
     return fig
 
 # ------------------------------
-# DASH APP
+# APP
 # ------------------------------
 app = Dash(__name__)
 
 app.layout = html.Div([
     html.H2("Texas Solar Dashboard (ERCOT Zones)"),
 
-    dl.EventListener(
-        id="map_click",
-        events=["click"],
-        children=dl.Map(
-            center=[31, -100],
-            zoom=6,
-            style={"height": "420px"},
-            children=[
-                dl.TileLayer(),
-                dl.GeoJSON(data=ercot_zones, options=dict(style=zone_style)),
-                dl.Marker(id="click_marker")
-            ]
-        )
+    dl.Map(
+        id="map",
+        center=[31, -100],
+        zoom=6,
+        style={"height": "420px"},
+        click_lat_lng=None,
+        children=[
+            dl.TileLayer(),
+            dl.GeoJSON(data=ercot_zones, options=dict(style=zone_style)),
+            dl.Marker(id="marker")
+        ]
     ),
 
     html.Div([
@@ -180,16 +125,13 @@ app.layout = html.Div([
 @app.callback(
     Output("lat", "value"),
     Output("lon", "value"),
-    Output("click_marker", "position"),
-    Input("map_click", "event")
+    Output("marker", "position"),
+    Input("map", "click_lat_lng")
 )
-def update_coords(event):
-    if event is None:
+def update_coords(click):
+    if click is None:
         return 30.26, -97.74, [30.26, -97.74]
-
-    lat = event["latlng"]["lat"]
-    lon = event["latlng"]["lng"]
-    return lat, lon, [lat, lon]
+    return click[0], click[1], click
 
 @app.callback(
     Output("chart", "figure"),
