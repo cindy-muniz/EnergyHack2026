@@ -1,153 +1,142 @@
-# ------------------------------
-# app.py
-# ------------------------------
-
 import dash
-from dash import html, dcc, Output, Input
+from dash import dcc, html
+from dash.dependencies import Input, Output
 import dash_leaflet as dl
 import dash_leaflet.express as dlx
 import plotly.graph_objects as go
 import pandas as pd
-import numpy as np
+import requests
 from datetime import datetime, timedelta
 
 # ------------------------------
-# 1️⃣ Helper: Simulate solar supply
+# ERCOT zones (GeoJSON) - example simplified
 # ------------------------------
+ercot_zones = {
+    "type": "FeatureCollection",
+    "features": [
+        {"type": "Feature", "properties": {"name": "North"}, 
+         "geometry": {"type": "Polygon", "coordinates":[[[-97,-32],[-97,34],[-100,34],[-100,-32],[-97,-32]]] }},
+        {"type": "Feature", "properties": {"name": "South"}, 
+         "geometry": {"type": "Polygon", "coordinates":[[[-95,-32],[-95,30],[-100,30],[-100,-32],[-95,-32]]] }}
+    ]
+}
+polygons = [dl.GeoJSON(data=ercot_zones, options=dict(style=dict(weight=2, color="green", fillOpacity=0.1)))]
+
+# ------------------------------
+# Constants for NREL API
+# ------------------------------
+NREL_URL = "https://developer.nrel.gov/api/solar/solar_resource/v1.json"
+NREL_KEY = "xrKsemxjKJqoObOC1IDEvt4qNFbMQQy79pFqGWKF"
+
+# ------------------------------
+# Functions to get data
+# ------------------------------
+def get_weather_overlay(lat, lon):
+    params = {"api_key": NREL_KEY, "lat": lat, "lon": lon}
+    r = requests.get(NREL_URL, params=params)
+    if r.status_code != 200:
+        return {"ghi": 0, "temp": 25, "cloud": 0}
+    data = r.json()
+    try:
+        solrad = data["outputs"]["avg_ghi"]["annual"]  # Just an example field
+    except:
+        solrad = 0
+    return {"ghi": solrad, "temp": 25, "cloud": 0}
+
 def get_solar_supply(lat, lon):
-    # Hourly timestamps for 7 days
+    # 1 week hourly
     timestamps = pd.date_range(datetime.now(), periods=168, freq='h')
-
-    # Simulated solar irradiance (GHI)
-    ghi = np.clip(500 + 300*np.sin(np.linspace(0, 3*np.pi, 168)) + 50*np.random.randn(168), 0, None)
-    cloud_factor = np.random.uniform(0.7, 1.0, 168)
-    temp_factor = 1 - 0.004*(np.random.uniform(20, 35, 168)-25)
-
-    # Areas (m2) and efficiency
-    res_area, comm_area = 10000, 50000
-    eff, pr = 0.18, 0.75
-
-    res_supply = ghi * cloud_factor * temp_factor * res_area * eff / 1000
-    comm_supply = ghi * cloud_factor * temp_factor * comm_area * eff * pr / 1000
+    weather = get_weather_overlay(lat, lon)
+    
+    ghi = weather['ghi']
+    cloud_factor = 1 - weather['cloud']/100
+    temp_factor = 1 - 0.004*(weather['temp']-25)
+    
+    res_area = 10000
+    comm_area = 50000
+    eff = 0.18
+    pr = 0.75
 
     df = pd.DataFrame({
-        "timestamp": timestamps,
-        "res_supply": res_supply,
-        "comm_supply": comm_supply
+        'timestamp': timestamps,
+        'res_supply': ghi * cloud_factor * temp_factor * (res_area * eff / 1000),
+        'comm_supply': ghi * cloud_factor * temp_factor * (comm_area * eff * pr / 1000)
     })
-    return df
 
-# ------------------------------
-# 2️⃣ Build the Plotly figure
-# ------------------------------
-def build_figure(lat, lon):
-    df = get_solar_supply(lat, lon)
-
-    # Simulate demand
-    df["res_demand"] = df.res_supply * np.random.uniform(0.7, 1.0, len(df))
-    df["comm_demand"] = df.comm_supply * np.random.uniform(0.7, 1.0, len(df))
-
-    # Aggregate
-    df["total_supply"] = df.res_supply + df.comm_supply
-    df["total_demand"] = df.res_demand + df.comm_demand
-
-    # Equilibrium curve
-    df["equilibrium"] = df.total_supply - df.total_demand
-
-    # TOU pricing
-    hour = df.timestamp.dt.hour
-    df["price"] = np.select(
-        [hour < 6, hour < 14, hour < 20, hour < 22],
-        [0.07, 0.11, 0.22, 0.13],
-        default=0.07
-    )
-
-    fig = go.Figure()
-
-    # Supply & Demand
-    fig.add_trace(go.Scatter(x=df.timestamp, y=df.res_supply,
-                             name="Residential Supply", line=dict(color="orange")))
-    fig.add_trace(go.Scatter(x=df.timestamp, y=df.res_demand,
-                             name="Residential Demand", line=dict(color="red", dash="dash")))
-    fig.add_trace(go.Scatter(x=df.timestamp, y=df.comm_supply,
-                             name="Commercial Supply", line=dict(color="blue")))
-    fig.add_trace(go.Scatter(x=df.timestamp, y=df.comm_demand,
-                             name="Commercial Demand", line=dict(color="navy", dash="dash")))
+    # Example demand (could replace with ERCOT data)
+    df['res_demand'] = df['res_supply'] * 0.9
+    df['comm_demand'] = df['comm_supply'] * 0.9
 
     # Equilibrium
+    df['equilibrium'] = (df['res_supply'] + df['comm_supply'] + df['res_demand'] + df['comm_demand']) / 4
+
+    # Example TOU pricing
+    df['tou_price'] = [0.1 if 6 <= ts.hour <= 22 else 0.05 for ts in df['timestamp']]
+
+    return df
+
+def build_figure(lat, lon):
+    df = get_solar_supply(lat, lon)
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=df.timestamp, y=df.res_supply,
+                             name="Residential Supply", line=dict(color="orange")))
+    fig.add_trace(go.Scatter(x=df.timestamp, y=df.comm_supply,
+                             name="Commercial Supply", line=dict(color="blue")))
+    fig.add_trace(go.Scatter(x=df.timestamp, y=df.res_demand,
+                             name="Residential Demand", line=dict(color="darkorange", dash="dash")))
+    fig.add_trace(go.Scatter(x=df.timestamp, y=df.comm_demand,
+                             name="Commercial Demand", line=dict(color="darkblue", dash="dash")))
     fig.add_trace(go.Scatter(x=df.timestamp, y=df.equilibrium,
-                             name="Market Equilibrium (Supply − Demand)",
-                             line=dict(color="green", width=3)))
-
-    # Zero reference
-    fig.add_hline(y=0, line=dict(color="gray", dash="dot"))
-
-    # TOU pricing overlay
-    fig.add_trace(go.Scatter(
-        x=df.timestamp, y=df.price,
-        name="TOU Price ($/kWh)",
-        yaxis="y2",
-        line=dict(color="black")
-    ))
-
+                             name="Equilibrium", line=dict(color="green", width=3, dash="dot")))
+    fig.add_trace(go.Scatter(x=df.timestamp, y=df.tou_price,
+                             name="TOU Price ($/kWh)", line=dict(color="red"), yaxis="y2"))
+    
+    # Dual axis
     fig.update_layout(
-        title=f"Texas Solar Supply, Demand & Market Equilibrium<br>LAT={lat:.3f}, LON={lon:.3f}",
+        yaxis=dict(title="kW"),
+        yaxis2=dict(title="$/kWh", overlaying="y", side="right"),
+        title="Solar Supply/Demand + TOU Pricing",
         xaxis_title="Time",
-        yaxis=dict(title="Power Balance (kW)"),
-        yaxis2=dict(title="Price ($/kWh)", overlaying="y", side="right"),
-        template="plotly_white",
-        legend=dict(orientation="h"),
-        height=600
+        template="plotly_dark",
+        legend=dict(orientation="h")
     )
     return fig
 
 # ------------------------------
-# 3️⃣ ERCOT zone polygons (simplified)
-# ------------------------------
-ercot_zones = [
-    {"name": "North", "coords": [[33.0, -100.0], [33.0, -95.0], [36.5, -95.0], [36.5, -100.0]]},
-    {"name": "South", "coords": [[26.0, -100.0], [26.0, -95.0], [33.0, -95.0], [33.0, -100.0]]}
-]
-
-polygons = [dl.Polygon(positions=zone["coords"], color="purple", fillOpacity=0.1, weight=2) for zone in ercot_zones]
-
-# ------------------------------
-# 4️⃣ Dash App
+# Dash App
 # ------------------------------
 app = dash.Dash(__name__)
-app.title = "Texas Solar Market Dashboard"
 
 app.layout = html.Div([
-    html.H2("Texas Solar Market Dashboard"),
+    html.H2("Texas Solar Dashboard"),
     html.Div([
         dl.Map(center=[31.0, -97.0], zoom=6, children=[
             dl.TileLayer(),
             *polygons,
-            dl.LayerGroup(id="marker-layer")
+            dl.Marker(id="marker", position=[30.26, -97.74])
         ], style={'width': '100%', 'height': '400px'}, id="map")
     ]),
     dcc.Graph(id="chart", figure=build_figure(30.26, -97.74))
 ])
 
 # ------------------------------
-# 5️⃣ Callbacks: Update chart on map click
+# Callback: update chart + marker
 # ------------------------------
 @app.callback(
     Output("chart", "figure"),
+    Output("marker", "position"),
     Input("map", "click_lat_lng")
 )
 def update_chart(click_lat_lng):
     if click_lat_lng is None:
-        lat, lon = 30.26, -97.74  # Austin default
+        lat, lon = 30.26, -97.74
     else:
         lat, lon = click_lat_lng
-    return build_figure(lat, lon)
+    return build_figure(lat, lon), [lat, lon]
 
 # ------------------------------
-# 6️⃣ Run server
+# Run
 # ------------------------------
 if __name__ == "__main__":
-    # Render uses 0.0.0.0 and PORT environment variable
-    import os
-    port = int(os.environ.get("PORT", 8050))
-    app.run(host="0.0.0.0", port=port)
+    app.run(debug=True, host="0.0.0.0", port=8050)
+
