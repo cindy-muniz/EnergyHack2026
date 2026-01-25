@@ -1,168 +1,134 @@
 import os
-import pandas as pd
-import numpy as np
-import yfinance as yf
-import requests
-from datetime import datetime
-import plotly.graph_objs as go
-
 import dash
-from dash import dcc, html, Input, Output, State
+from dash import dcc, html, Input, Output
 import dash_bootstrap_components as dbc
 import dash_leaflet as dl
-import dash_leaflet.express as dlx
+import pandas as pd
+import yfinance as yf
+import plotly.graph_objs as go
+import requests
 import openai
 
-# ----------------------------
-# ENVIRONMENT
-# ----------------------------
-openai.api_key = os.environ.get("OPENAI_API_KEY")
-MAPBOX_TOKEN = os.environ.get("MAPBOX_TOKEN", "")
+# Gemini AI key from Render env
+openai.api_key = os.environ.get("GEMINI_API_KEY")
 
-# ----------------------------
-# SAMPLE TEXAS SOLAR DATA
-# ----------------------------
-# Replace this with actual data source if available
-texas_solar_zones = {
-    "Austin": {"lat": 30.2672, "lon": -97.7431},
-    "Dallas": {"lat": 32.7767, "lon": -96.7970},
-    "Houston": {"lat": 29.7604, "lon": -95.3698},
-}
-
-# Dummy supply-demand data
-def get_supply_demand(city):
-    x = np.linspace(0, 10, 50)
-    commercial = np.sin(x) + 5 + np.random.rand(50)
-    residential = np.cos(x) + 5 + np.random.rand(50)
-    equilibrium = (commercial + residential) / 2
-    tou_price = np.linspace(0.1, 0.3, 50)
-    return pd.DataFrame({
-        "x": x,
-        "Commercial": commercial,
-        "Residential": residential,
-        "Equilibrium": equilibrium,
-        "TOU Price": tou_price
-    })
-
-# ----------------------------
-# GEMINI AI SUMMARY
-# ----------------------------
-def get_gemini_summary(prompt):
-    try:
-        response = openai.Completion.create(
-            model="text-davinci-003",
-            prompt=prompt,
-            max_tokens=200
-        )
-        return response.choices[0].text.strip()
-    except Exception as e:
-        return f"Error fetching Gemini AI summary: {e}"
-
-# ----------------------------
-# DASH APP SETUP
-# ----------------------------
+# Initialize app
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 server = app.server
 
-# ----------------------------
-# LAYOUT
-# ----------------------------
+# Sample commercial/residential solar data
+solar_data = pd.DataFrame({
+    "Location": ["Austin", "Houston", "Dallas", "San Antonio"],
+    "Commercial Supply": [50, 70, 65, 55],
+    "Residential Supply": [40, 60, 55, 45],
+    "Commercial Demand": [45, 65, 60, 50],
+    "Residential Demand": [35, 50, 50, 40],
+    "TOU Price": [0.12, 0.11, 0.13, 0.12]
+})
+
+# Homepage disclaimer
+disclaimer = "⚠️ Specusol provides data for informational purposes only. Not financial advice."
+
+# Layout
 app.layout = dbc.Container([
-    dbc.Row([
-        dbc.Col([
-            html.H2("SpecuSol Solar Map", className="text-center"),
-            html.P("Disclaimer: The information provided is for educational purposes only."),
-            dl.Map(
-                id="solar-map",
-                center=[31.0, -97.0],
-                zoom=6,
-                children=[
-                    dl.TileLayer(),
-                    dl.LayerGroup(id="weather-layer"),
-                    dl.MarkerClusterGroup(
-                        id="markers",
-                        children=[
-                            dl.Marker(position=[v["lat"], v["lon"]], children=dl.Popup(k))
-                            for k, v in texas_solar_zones.items()
-                        ]
-                    )
-                ],
-                style={'width': '100%', 'height': '500px'}
-            )
-        ], width=6),
-
-        dbc.Col([
-            html.H4("Supply & Demand Chart"),
-            dcc.Graph(id="supply-demand-chart")
-        ], width=6)
-    ]),
-
-    html.Hr(),
-    dbc.Row([
-        dbc.Col([
-            html.H4("Finances & AI Summary"),
-            dcc.Dropdown(
-                id="stock-dropdown",
-                options=[
-                    {"label": "TAN (Solar ETF)", "value": "TAN"},
-                    {"label": "TSLA", "value": "TSLA"},
-                    {"label": "ENPH", "value": "ENPH"}
-                ],
-                value="TAN"
-            ),
-            dcc.Graph(id="stock-chart"),
-            html.Div(id="gemini-summary", style={"marginTop": "20px"})
-        ])
-    ])
+    html.H1("Specusol - Texas Solar Market Dashboard"),
+    html.Img(src="/assets/specusol_icon.png", height="60px"),
+    html.P(disclaimer),
+    dbc.Tabs([
+        dbc.Tab(label="Map & Solar Chart", tab_id="map-chart"),
+        dbc.Tab(label="Finances", tab_id="finances")
+    ], id="tabs", active_tab="map-chart"),
+    html.Div(id="tab-content")
 ], fluid=True)
 
-# ----------------------------
-# CALLBACKS
-# ----------------------------
+# Helper: fetch weather overlay tiles
+def get_weather_tile():
+    return dl.TileLayer(url="https://tile.openweathermap.org/map/temp_new/{z}/{x}/{y}.png?appid=YOUR_OPENWEATHER_KEY")
+
+# Tab content callback
+@app.callback(
+    Output("tab-content", "children"),
+    Input("tabs", "active_tab")
+)
+def render_tab(tab):
+    if tab == "map-chart":
+        # Map centered on Texas
+        map_component = dl.Map(center=[31.0, -100.0], zoom=6, style={"height": "600px"}, children=[
+            dl.TileLayer(url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"),
+            get_weather_tile(),
+            dl.Marker(position=[30.2672, -97.7431], children=dl.Tooltip("Austin")),
+            dl.Marker(position=[29.7604, -95.3698], children=dl.Tooltip("Houston")),
+            dl.Marker(position=[32.7767, -96.797], children=dl.Tooltip("Dallas")),
+            dl.Marker(position=[29.4241, -98.4936], children=dl.Tooltip("San Antonio")),
+        ])
+
+        chart_component = dcc.Graph(id="supply-demand-chart")
+
+        return dbc.Row([
+            dbc.Col(map_component, width=6),
+            dbc.Col(chart_component, width=6)
+        ])
+
+    elif tab == "finances":
+        # Solar ETF
+        etf = yf.Ticker("TAN")  # Example solar ETF
+        hist = etf.history(period="1mo")
+        fig = go.Figure([go.Scatter(x=hist.index, y=hist["Close"], mode="lines")])
+        fig.update_layout(title="TAN ETF - 1 Month")
+
+        # Gemini AI Summary
+        try:
+            prompt = "Summarize the current trends in solar stocks in Texas."
+            response = openai.Completion.create(
+                model="text-davinci-003",
+                prompt=prompt,
+                max_tokens=200
+            )
+            summary = response.choices[0].text
+        except Exception as e:
+            summary = f"Could not fetch Gemini AI summary: {e}"
+
+        return html.Div([
+            dcc.Graph(figure=fig),
+            html.H4("Gemini AI Summary"),
+            html.P(summary)
+        ])
+
+# Callback: update chart when clicking map
 @app.callback(
     Output("supply-demand-chart", "figure"),
-    Input("solar-map", "click_lat_lng")
+    Input({"type": "marker", "index": dash.ALL}, "n_clicks")
 )
-def update_chart(click_lat_lng):
-    # Default city if none clicked
-    city = "Austin"
-    if click_lat_lng:
-        lat, lon = click_lat_lng
-        # Simple nearest city logic
-        city = min(texas_solar_zones.keys(), key=lambda k: (texas_solar_zones[k]["lat"]-lat)**2 + (texas_solar_zones[k]["lon"]-lon)**2)
-    df = get_supply_demand(city)
+def update_chart(n_clicks_list):
+    ctx = dash.callback_context
+    if not ctx.triggered or all(v is None for v in n_clicks_list):
+        df = solar_data.iloc[0]  # Default
+    else:
+        # Get clicked location
+        idx = ctx.triggered[0]["prop_id"].split(".")[0]
+        loc_name = idx.split('"index":')[1].split("}")[0].strip('"')
+        df = solar_data[solar_data["Location"] == loc_name].iloc[0]
+
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df["x"], y=df["Commercial"], name="Commercial Supply"))
-    fig.add_trace(go.Scatter(x=df["x"], y=df["Residential"], name="Residential Demand"))
-    fig.add_trace(go.Scatter(x=df["x"], y=df["Equilibrium"], name="Equilibrium", line=dict(dash="dash")))
-    fig.add_trace(go.Scatter(x=df["x"], y=df["TOU Price"], name="TOU Price", yaxis="y2"))
+    fig.add_trace(go.Scatter(
+        x=["Commercial", "Residential"], y=[df["Commercial Supply"], df["Residential Supply"]],
+        name="Supply", mode="lines+markers"
+    ))
+    fig.add_trace(go.Scatter(
+        x=["Commercial", "Residential"], y=[df["Commercial Demand"], df["Residential Demand"]],
+        name="Demand", mode="lines+markers"
+    ))
+    fig.add_trace(go.Scatter(
+        x=["Commercial", "Residential"], y=[df["TOU Price"], df["TOU Price"]],
+        name="TOU Price", mode="lines+markers", yaxis="y2"
+    ))
     fig.update_layout(
-        title=f"Solar Supply & Demand for {city}",
-        yaxis=dict(title="Supply/Demand"),
+        title=f"Solar Supply & Demand - {df['Location']}",
+        yaxis=dict(title="MW"),
         yaxis2=dict(title="TOU Price ($/kWh)", overlaying="y", side="right")
     )
     return fig
 
-@app.callback(
-    Output("stock-chart", "figure"),
-    Output("gemini-summary", "children"),
-    Input("stock-dropdown", "value")
-)
-def update_finances(stock_symbol):
-    # Stock chart
-    df = yf.download(stock_symbol, period="6mo", interval="1d")
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df.index, y=df["Close"], name=stock_symbol))
-    fig.update_layout(title=f"{stock_symbol} Closing Prices (6 months)")
-
-    # Gemini AI summary
-    prompt = f"Summarize recent trends and insights for {stock_symbol} in the solar energy sector."
-    summary = get_gemini_summary(prompt)
-
-    return fig, summary
-
-# ----------------------------
-# RUN APP
-# ----------------------------
 if __name__ == "__main__":
-    app.run_server(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    app.run_server(debug=True)
+nviron.get("PORT", 10000)))
