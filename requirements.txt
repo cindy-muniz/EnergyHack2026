@@ -1,7 +1,9 @@
 dash
 dash-bootstrap-components
 dash-leaflet
-requests
 pandas
+requests
 geopy
+yfinance
+numpy
 gunicorn
