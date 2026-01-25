@@ -9,7 +9,7 @@ numpy>=1.25.0
 requests>=2.31.0
 yfinance>=0.2.28
 
-# GenAI API (optional if used in your app)
+# GenAI API (if used)
 genai>=0.1.4
 
 # Deployment
