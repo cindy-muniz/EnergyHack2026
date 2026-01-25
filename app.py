@@ -146,4 +146,4 @@ def update_main_graphs(coords):
     fig_sd.add_trace(go.Scatter(x=df['time'], y=df['demand_mw'], name="Demand (MW)", line=dict(color='#00FFCC', dash='dash')))
     fig_sd.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(l=20,r=20,t=30,b=20))
 
-    fig_ohlc = go.Figure(data=[go.Candlestick(x=df['time'], open=df['supply_mw']*0.95, high=df['supply_mw
+    fig_ohlc = go.Figure(data=[go.Candlestick(x=df['time'], open=df['supply_mw']*0.95, high=df['supply_mw']
