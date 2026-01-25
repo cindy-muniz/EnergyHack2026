@@ -13,12 +13,16 @@ ercot_zones = {
     "features": [
         {"type":"Feature","properties":{"zone":"North"},
          "geometry":{"type":"Polygon","coordinates":[[[-103,36],[-94,36],[-94,33],[-103,33],[-103,36]]]}},
+
         {"type":"Feature","properties":{"zone":"South"},
          "geometry":{"type":"Polygon","coordinates":[[[-102,29],[-96,29],[-96,26],[-102,26],[-102,29]]]}},
+
         {"type":"Feature","properties":{"zone":"West"},
          "geometry":{"type":"Polygon","coordinates":[[[-106,33],[-102,33],[-102,29],[-106,29],[-106,33]]]}},
+
         {"type":"Feature","properties":{"zone":"Houston"},
          "geometry":{"type":"Polygon","coordinates":[[[-96,31],[-94,31],[-94,29],[-96,29],[-96,31]]]}},
+
         {"type":"Feature","properties":{"zone":"Coastal"},
          "geometry":{"type":"Polygon","coordinates":[[[-98,29],[-94,29],[-94,26],[-98,26],[-98,29]]]}}
     ]
@@ -43,7 +47,7 @@ def get_solar_supply(lat, lon):
     })
 
 # ------------------------------
-# FIGURE
+# FIGURE BUILDER
 # ------------------------------
 def build_figure(lat, lon):
     df = get_solar_supply(lat, lon)
@@ -60,13 +64,32 @@ def build_figure(lat, lon):
 
     fig = go.Figure()
 
-    fig.add_trace(go.Scatter(df.timestamp, df.res_supply, name="Residential Supply"))
-    fig.add_trace(go.Scatter(df.timestamp, res_demand, name="Residential Demand", dash="dash"))
-    fig.add_trace(go.Scatter(df.timestamp, df.comm_supply, name="Commercial Supply"))
-    fig.add_trace(go.Scatter(df.timestamp, comm_demand, name="Commercial Demand", dash="dash"))
+    fig.add_trace(go.Scatter(
+        x=df.timestamp, y=df.res_supply,
+        name="Residential Supply",
+        line=dict(color="orange")
+    ))
 
     fig.add_trace(go.Scatter(
-        df.timestamp, tou_price,
+        x=df.timestamp, y=res_demand,
+        name="Residential Demand",
+        line=dict(color="red", dash="dash")
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=df.timestamp, y=df.comm_supply,
+        name="Commercial Supply",
+        line=dict(color="blue")
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=df.timestamp, y=comm_demand,
+        name="Commercial Demand",
+        line=dict(color="navy", dash="dash")
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=df.timestamp, y=tou_price,
         name="TOU Price ($/kWh)",
         yaxis="y2",
         line=dict(color="black")
@@ -74,8 +97,13 @@ def build_figure(lat, lon):
 
     fig.update_layout(
         title=f"Texas Solar Supply, Demand & TOU Pricing<br>LAT={lat:.3f}, LON={lon:.3f}",
+        xaxis_title="Time",
         yaxis=dict(title="Power (kW)"),
-        yaxis2=dict(title="Price ($/kWh)", overlaying="y", side="right"),
+        yaxis2=dict(
+            title="Price ($/kWh)",
+            overlaying="y",
+            side="right"
+        ),
         template="plotly_white",
         legend=dict(orientation="h")
     )
@@ -97,8 +125,6 @@ app.layout = html.Div([
         style={"height": "420px"},
         children=[
             dl.TileLayer(),
-
-            # 🔹 STATIC style (JSON-safe)
             dl.GeoJSON(
                 data=ercot_zones,
                 style={
@@ -108,7 +134,6 @@ app.layout = html.Div([
                     "fillOpacity": 0.25
                 }
             ),
-
             dl.Marker(
                 id="marker",
                 position=[30.26, -97.74]
@@ -123,7 +148,10 @@ app.layout = html.Div([
         dcc.Input(id="lon", value=-97.74, type="number", step=0.001)
     ], style={"marginTop": "10px"}),
 
-    dcc.Graph(id="chart")
+    dcc.Graph(
+        id="chart",
+        figure=build_figure(30.26, -97.74)
+    )
 ])
 
 # ------------------------------
