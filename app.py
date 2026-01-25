@@ -97,25 +97,36 @@ app.layout = dbc.Container(fluid=True, children=[
 # ===============================
 @app.callback(
     Output("supply-demand-chart", "figure"),
-    Input({"type": "city-marker", "city": Dash.ALL}, "n_clicks"),
+    Input({"type": "city-marker", "city": "Austin"}, "n_clicks"),
+    Input({"type": "city-marker", "city": "Dallas"}, "n_clicks"),
+    Input({"type": "city-marker", "city": "Houston"}, "n_clicks"),
     prevent_initial_call=True
 )
-def update_chart(_):
-    ctx = Dash.callback_context
-    city = ctx.triggered[0]["prop_id"].split('"city":"')[1].split('"')[0]
-    d = SOLAR_DATA[city]
+def update_chart(austin_click, dallas_click, houston_click):
+    # Get triggered city
+    triggered_city = None
+    if austin_click:
+        triggered_city = "Austin"
+    elif dallas_click:
+        triggered_city = "Dallas"
+    elif houston_click:
+        triggered_city = "Houston"
+    
+    if triggered_city:
+        d = SOLAR_DATA[triggered_city]
 
-    fig = go.Figure()
-    fig.add_bar(name="Commercial Supply", x=["Supply"], y=[d["commercial"]])
-    fig.add_bar(name="Residential Supply", x=["Supply"], y=[d["residential"]])
-    fig.add_scatter(name="Demand", x=["Supply"], y=[d["demand"]], mode="lines+markers")
+        fig = go.Figure()
+        fig.add_bar(name="Commercial Supply", x=["Supply"], y=[d["commercial"]])
+        fig.add_bar(name="Residential Supply", x=["Supply"], y=[d["residential"]])
+        fig.add_scatter(name="Demand", x=["Supply"], y=[d["demand"]], mode="lines+markers")
 
-    fig.update_layout(
-        title=f"{city} Solar Supply vs Demand (TOU ${d['tou']}/kWh)",
-        barmode="group",
-        yaxis_title="MW"
-    )
-    return fig
+        fig.update_layout(
+            title=f"{triggered_city} Solar Supply vs Demand (TOU ${d['tou']}/kWh)",
+            barmode="group",
+            yaxis_title="MW"
+        )
+        return fig
+    return go.Figure()
 
 # ===============================
 # Solar ETF Chart
@@ -168,5 +179,5 @@ Provide a concise Texas solar market outlook for 2026.
 # Run
 # ===============================
 if __name__ == "__main__":
-    app.run_server()
+    app.run_server(debug=True)
 
