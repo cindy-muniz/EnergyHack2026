@@ -13,7 +13,7 @@ from datetime import datetime
 # Initialize app
 app = Dash(__name__, external_stylesheets=[dbc.themes.CYBORG, dbc.icons.FONT_AWESOME])
 server = app.server
-geolocator = Nominatim(user_agent="energy_hack_texas_v3_final_fixed")
+geolocator = Nominatim(user_agent="specusol_final_build_2026")
 
 GLASS_STYLE = {
     "background": "rgba(255, 255, 255, 0.05)",
@@ -95,15 +95,17 @@ def get_mock_data():
     prevent_initial_call=True
 )
 def update_map(n, zip_code):
-    if not zip_code: raise exceptions.PreventUpdate
+    if not zip_code:
+        raise exceptions.PreventUpdate
     try:
         loc = geolocator.geocode(f"{zip_code}, Texas", timeout=10)
         if loc:
-            return {"center": [loc.latitude, loc.longitude], "zoom": 10, "transition": "flyTo"}, \
-                   [dl.Marker(position=[loc.latitude, loc.longitude])], \
-                   {'lat': loc.latitude, 'lon': loc.longitude}
-    except Exception as e:
-        print(f"Geocoding Error: {e}")
+            viewport = {"center": [loc.latitude, loc.longitude], "zoom": 10, "transition": "flyTo"}
+            marker = [dl.Marker(position=[loc.latitude, loc.longitude])]
+            coords = {'lat': loc.latitude, 'lon': loc.longitude}
+            return viewport, marker, coords
+    except:
+        pass
     return {"center": [31.0, -99.0], "zoom": 6}, [], {'lat': 31.0, 'lon': -99.0}
 
 @app.callback(
@@ -112,10 +114,7 @@ def update_map(n, zip_code):
 )
 def toggle_radar(checked):
     if checked:
-        return [dl.TileLayer(
-            url="https://tilecache.rainviewer.com/v2/radar/nowcast_5m/256/{z}/{x}/{y}/2/1_1.png",
-            opacity=0.5, id="radar-tiles"
-        )]
+        return [dl.TileLayer(url="https://tilecache.rainviewer.com/v2/radar/nowcast_5m/256/{z}/{x}/{y}/2/1_1.png", opacity=0.5)]
     return []
 
 @app.callback(
@@ -125,24 +124,22 @@ def toggle_radar(checked):
 def update_charts(coords):
     df = get_mock_data()
     try:
-        url = f"https://api.open-meteo.com/v1/forecast?latitude={coords['lat']}&longitude={coords['lon']}&hourly=shortwave_radiation&timezone=auto"
-        response = requests.get(url, timeout=5)
-        if response.status_code == 200:
-            r = response.json()
-            if 'hourly' in r:
-                df = pd.DataFrame({
-                    'time': pd.to_datetime(r['hourly']['time'][:24]),
-                    'supply_mw': np.array(r['hourly']['shortwave_radiation'][:24]) * 0.12,
-                    'demand_mw': [45 + 15 * np.sin((i-10) * np.pi / 12) for i in range(24)]
-                })
-    except: pass
+        api_url = f"https://api.open-meteo.com/v1/forecast?latitude={coords['lat']}&longitude={coords['lon']}&hourly=shortwave_radiation&timezone=auto"
+        r = requests.get(api_url, timeout=5).json()
+        if 'hourly' in r:
+            # Re-written line to avoid any potential syntax confusion
+            hourly_time = pd.to_datetime(r['hourly']['time'][:24])
+            hourly_supply = np.array(r['hourly']['shortwave_radiation'][:24]) * 0.12
+            df = pd.DataFrame({'time': hourly_time, 'supply_mw': hourly_supply})
+            df['demand_mw'] = [45 + 15 * np.sin((i-10) * np.pi / 12) for i in range(24)]
+    except:
+        pass
 
     fig_sd = go.Figure()
     fig_sd.add_trace(go.Scatter(x=df['time'], y=df['supply_mw'], name="Supply", fill='tozeroy', line=dict(color='#FFD700')))
     fig_sd.add_trace(go.Scatter(x=df['time'], y=df['demand_mw'], name="Demand", line=dict(color='#00FFCC', dash='dash')))
     fig_sd.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(l=10,r=10,t=30,b=10))
 
-    # FIXED LINE BELOW
     fig_ohlc = go.Figure(data=[go.Candlestick(x=df['time'], open=df['supply_mw']*0.9, high=df['supply_mw']*1.1, low=df['supply_mw']*0.8, close=df['supply_mw'])])
     fig_ohlc.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis_rangeslider_visible=False)
     
@@ -154,9 +151,11 @@ def update_etf(_):
     try:
         data = yf.download("TAN", period="1mo", progress=False)
         if not data.empty:
-            if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
+            if isinstance(data.columns, pd.MultiIndex):
+                data.columns = data.columns.get_level_values(0)
             fig = go.Figure(go.Scatter(x=data.index, y=data['Close'], fill='tozeroy', line=dict(color='#00CCFF')))
-    except: pass
+    except:
+        pass
     fig.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(l=10,r=10,t=10,b=10))
     return fig
 
