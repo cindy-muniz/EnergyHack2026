@@ -13,7 +13,7 @@ from datetime import datetime
 # Initialize app
 app = Dash(__name__, external_stylesheets=[dbc.themes.CYBORG, dbc.icons.FONT_AWESOME])
 server = app.server
-geolocator = Nominatim(user_agent="energy_hack_texas_v3_final")
+geolocator = Nominatim(user_agent="energy_hack_texas_v3_final_fixed")
 
 GLASS_STYLE = {
     "background": "rgba(255, 255, 255, 0.05)",
@@ -41,7 +41,6 @@ app.layout = dbc.Container(fluid=True, className="p-4", children=[
     dbc.Row([
         dbc.Col([
             html.Div([
-                # Weather Radar Toggle in BLUE
                 dbc.Checklist(
                     options=[{"label": "Show Weather Radar", "value": 1}],
                     value=[], id="weather-toggle", switch=True,
@@ -72,7 +71,6 @@ app.layout = dbc.Container(fluid=True, className="p-4", children=[
         
         dbc.Col([
             html.Div([
-                # ETF Header in BLUE
                 html.H6("SOLAR TEXAS MUTUAL FUND (TAN)", className="text-info mb-3 fw-bold"),
                 dcc.Graph(id="solar-etf-mini", style={"height": "320px"})
             ], style=GLASS_STYLE)
@@ -82,7 +80,6 @@ app.layout = dbc.Container(fluid=True, className="p-4", children=[
     dcc.Store(id='coords-store', data={'lat': 31.0, 'lon': -99.0})
 ])
 
-# --- Logic: Fallback Data (Safety Net for APIs) ---
 def get_mock_data():
     times = pd.date_range(start=datetime.now(), periods=24, freq='H')
     return pd.DataFrame({
@@ -90,8 +87,6 @@ def get_mock_data():
         'supply_mw': [max(0, 40 * np.sin((i-6) * np.pi / 12)) for i in range(24)],
         'demand_mw': [45 + 15 * np.sin((i-10) * np.pi / 12) for i in range(24)]
     })
-
-# --- Callbacks ---
 
 @app.callback(
     [Output("texas-map", "viewport"), Output("marker-layer", "children"), Output("coords-store", "data")],
@@ -119,8 +114,7 @@ def toggle_radar(checked):
     if checked:
         return [dl.TileLayer(
             url="https://tilecache.rainviewer.com/v2/radar/nowcast_5m/256/{z}/{x}/{y}/2/1_1.png",
-            opacity=0.5,
-            id="radar-tiles"
+            opacity=0.5, id="radar-tiles"
         )]
     return []
 
@@ -129,6 +123,42 @@ def toggle_radar(checked):
     Input("coords-store", "data")
 )
 def update_charts(coords):
-    df = get_mock_data() # Ensure graphs always have something to show
+    df = get_mock_data()
     try:
-        url = f"
+        url = f"https://api.open-meteo.com/v1/forecast?latitude={coords['lat']}&longitude={coords['lon']}&hourly=shortwave_radiation&timezone=auto"
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            r = response.json()
+            if 'hourly' in r:
+                df = pd.DataFrame({
+                    'time': pd.to_datetime(r['hourly']['time'][:24]),
+                    'supply_mw': np.array(r['hourly']['shortwave_radiation'][:24]) * 0.12,
+                    'demand_mw': [45 + 15 * np.sin((i-10) * np.pi / 12) for i in range(24)]
+                })
+    except: pass
+
+    fig_sd = go.Figure()
+    fig_sd.add_trace(go.Scatter(x=df['time'], y=df['supply_mw'], name="Supply", fill='tozeroy', line=dict(color='#FFD700')))
+    fig_sd.add_trace(go.Scatter(x=df['time'], y=df['demand_mw'], name="Demand", line=dict(color='#00FFCC', dash='dash')))
+    fig_sd.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(l=10,r=10,t=30,b=10))
+
+    # FIXED LINE BELOW
+    fig_ohlc = go.Figure(data=[go.Candlestick(x=df['time'], open=df['supply_mw']*0.9, high=df['supply_mw']*1.1, low=df['supply_mw']*0.8, close=df['supply_mw'])])
+    fig_ohlc.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis_rangeslider_visible=False)
+    
+    return fig_sd, fig_ohlc
+
+@app.callback(Output("solar-etf-mini", "figure"), Input("zip-btn", "n_clicks"))
+def update_etf(_):
+    fig = go.Figure().update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)')
+    try:
+        data = yf.download("TAN", period="1mo", progress=False)
+        if not data.empty:
+            if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
+            fig = go.Figure(go.Scatter(x=data.index, y=data['Close'], fill='tozeroy', line=dict(color='#00CCFF')))
+    except: pass
+    fig.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(l=10,r=10,t=10,b=10))
+    return fig
+
+if __name__ == "__main__":
+    app.run_server(debug=True)
