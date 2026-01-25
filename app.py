@@ -5,135 +5,192 @@ import yfinance as yf
 import dash_bootstrap_components as dbc
 import dash_leaflet as dl
 import plotly.graph_objects as go
-from dash import Dash, html, dcc, Input, Output, State, ctx
+import numpy as np
+from dash import Dash, html, dcc, Input, Output, State, ctx, exceptions
 from geopy.geocoders import Nominatim
 from datetime import datetime
 
-# Initialize
+# Initialize app
 app = Dash(__name__, external_stylesheets=[dbc.themes.CYBORG, dbc.icons.FONT_AWESOME])
 server = app.server
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-geolocator = Nominatim(user_agent="specusol_v2")
+geolocator = Nominatim(user_agent="specusol_data_engine_v2")
 
-# --- CUSTOM STYLING ---
-CARD_STYLE = {"padding": "20px", "borderRadius": "15px", "backgroundColor": "#111", "border": "1px solid #333"}
+GLASS_STYLE = {
+    "background": "rgba(255, 255, 255, 0.05)",
+    "backdropFilter": "blur(10px)",
+    "borderRadius": "15px",
+    "border": "1px solid rgba(255, 255, 255, 0.1)",
+    "padding": "20px",
+    "marginBottom": "20px"
+}
 
 app.layout = dbc.Container(fluid=True, className="p-4", children=[
-    # Header Section
     dbc.Row([
         dbc.Col([
-            html.H1([html.I(className="fas fa-sun me-2", style={"color": "#FFD700"}), "SPECUSOL 2.0"], className="display-4 fw-bold"),
-            html.P("Texas ERCOT Market Intelligence & Solar Forecasting", className="text-muted")
+            html.H1(["SPECUSOL ", html.Span("PRO", className="text-warning")], className="fw-bold mb-0"),
+            html.P("Texas Solar Supply & Weather Analytics", className="text-muted small")
         ], width=8),
         dbc.Col([
             dbc.InputGroup([
-                dbc.Input(id="zip-input", placeholder="Enter Zip Code (e.g. 78701)", type="text"),
+                dbc.Input(id="zip-input", placeholder="Texas Zip Code...", type="text", className="bg-dark text-white"),
                 dbc.Button("ANALYZE", id="zip-btn", color="warning", className="fw-bold"),
             ])
         ], width=4, className="align-self-center")
     ], className="mb-4"),
 
-    # Main Grid
     dbc.Row([
-        # Left: Map & Search
         dbc.Col([
-            html.Div(id="map-container", children=[
-                dl.Map(center=[31.0, -99.0], zoom=6, style={"height": "450px", "borderRadius": "15px"}, id="texas-map", children=[
+            html.Div([
+                dbc.Checklist(
+                    options=[{"label": "Show Weather Radar", "value": 1}],
+                    value=[],
+                    id="weather-toggle",
+                    switch=True,
+                    className="mb-2 text-info"
+                ),
+                dl.Map(center=[31.0, -99.0], zoom=6, style={"height": "500px", "borderRadius": "12px"}, id="texas-map", children=[
                     dl.TileLayer(url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"),
-                    dl.LayerGroup(id="marker-layer")
+                    dl.LayerGroup(id="marker-layer"),
+                    dl.LayerGroup(id="weather-layer") # Dedicated layer for radar
                 ])
-            ], style=CARD_STYLE)
-        ], width=5),
+            ], style=GLASS_STYLE)
+        ], lg=5, md=12),
 
-        # Right: Live Supply Forecast
         dbc.Col([
-            html.Div(dcc.Graph(id="live-supply-curve"), style=CARD_STYLE)
-        ], width=7)
-    ], className="mb-4"),
+            html.Div([
+                dcc.Graph(id="live-supply-demand", style={"height": "500px"})
+            ], style=GLASS_STYLE)
+        ], lg=7, md=12)
+    ]),
 
     dbc.Row([
-        # Market Candlestick
         dbc.Col([
             html.Div([
-                html.H5("ERCOT Solar Market Volatility (Hourly)", className="text-warning mb-3"),
+                html.H6("MARKET VOLATILITY (HOURLY OHLC)", className="text-warning mb-3 fw-bold"),
                 dcc.Graph(id="market-candlestick")
-            ], style=CARD_STYLE)
-        ], width=8),
-
-        # ETF & AI Insights
+            ], style=GLASS_STYLE)
+        ], lg=8, md=12),
+        
         dbc.Col([
             html.Div([
-                html.H5("Solar ETF (TAN)", className="text-info"),
-                dcc.Graph(id="solar-etf-mini", style={"height": "200px"}),
-                html.Hr(style={"borderColor": "#444"}),
-                html.H6("AI Market Outlook", className="text-warning"),
-                dcc.Loading(html.Div(id="gemini-summary", className="small text-muted"))
-            ], style=CARD_STYLE)
-        ], width=4)
-    ])
+                html.H6("SOLAR ETF (TAN)", className="text-info mb-3 fw-bold"),
+                dcc.Graph(id="solar-etf-mini", style={"height": "320px"})
+            ], style=GLASS_STYLE)
+        ], lg=4, md=12)
+    ]),
+    
+    # Store coordinates to prevent circular dependencies
+    dcc.Store(id='coords-store', data={'lat': 31.0, 'lon': -99.0})
 ])
 
-# --- CALLBACKS ---
+# --- Callbacks ---
 
+# 1. Geocoding and Map Update
 @app.callback(
-    [Output("texas-map", "center"), Output("texas-map", "zoom"), Output("marker-layer", "children")],
+    [Output("texas-map", "viewport"), Output("marker-layer", "children"), Output("coords-store", "data")],
     Input("zip-btn", "n_clicks"),
     State("zip-input", "value"),
     prevent_initial_call=True
 )
-def handle_zip(n, zip_code):
-    if not zip_code: return [31.0, -99.0], 6, []
+def update_location(n, zip_code):
+    if not zip_code or n is None:
+        raise exceptions.PreventUpdate
+    
     try:
-        loc = geolocator.geocode(f"{zip_code}, Texas")
+        loc = geolocator.geocode(f"{zip_code}, Texas, USA", timeout=10)
         if loc:
             marker = dl.Marker(position=[loc.latitude, loc.longitude], children=dl.Tooltip(f"Zip: {zip_code}"))
-            return [loc.latitude, loc.longitude], 11, [marker]
-    except: pass
-    return [31.0, -99.0], 6, []
-
-@app.callback(
-    [Output("live-supply-curve", "figure"), Output("market-candlestick", "figure")],
-    Input("texas-map", "center")
-)
-def update_charts(center):
-    lat, lon = center
-    # 1. Supply Curve Logic
-    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=shortwave_radiation&timezone=auto"
-    r = requests.get(url).json()
-    df = pd.DataFrame({'time': pd.to_datetime(r['hourly']['time']), 'ghi': r['hourly']['shortwave_radiation']})
-    df['supply'] = (df['ghi'] * 60000 * 0.18) / 1000 # kW Conversion
-
-    fig_supply = go.Figure(go.Scatter(x=df['time'], y=df['supply'], fill='tozeroy', line=dict(color='#FFD700', width=3)))
-    fig_supply.update_layout(title="Predicted Solar Supply (kW)", template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(l=10, r=10, t=40, b=10))
-
-    # 2. Candlestick logic (Simulated Market Movement)
-    fig_candle = go.Figure(data=[go.Candlestick(
-        x=df['time'][:24],
-        open=df['supply'][:24]*1.1, high=df['supply'][:24]*1.3,
-        low=df['supply'][:24]*0.8, close=df['supply'][:24],
-        increasing_line_color='#00ff9d', decreasing_line_color='#ff3d3d'
-    )])
-    fig_candle.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis_rangeslider_visible=False, margin=dict(l=10, r=10, t=10, b=10))
+            coords = {'lat': loc.latitude, 'lon': loc.longitude}
+            # Viewport forces the map to move
+            viewport = {"center": [loc.latitude, loc.longitude], "zoom": 10, "transition": "flyTo"}
+            return viewport, [marker], coords
+    except Exception as e:
+        print(f"Geocoding error: {e}")
     
-    return fig_supply, fig_candle
+    return {"center": [31.0, -99.0], "zoom": 6}, [], {'lat': 31.0, 'lon': -99.0}
 
-@app.callback(Output("solar-etf-mini", "figure"), Input("zip-btn", "n_clicks"))
-def update_etf(_):
-    data = yf.download("TAN", period="1mo")
-    if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
-    fig = go.Figure(go.Scatter(x=data.index, y=data['Close'], line=dict(color='#00d4ff')))
-    fig.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(l=0, r=0, t=0, b=0))
-    return fig
+# 2. Weather Radar Overlay
+@app.callback(
+    Output("weather-layer", "children"),
+    Input("weather-toggle", "value")
+)
+def toggle_weather(toggle_val):
+    if toggle_val:
+        # Using RainViewer Open API for radar
+        return [dl.TileLayer(
+            url="https://tilecache.rainviewer.com/v2/radar/nowcast_5m/256/{z}/{x}/{y}/2/1_1.png",
+            opacity=0.6,
+            id="radar-tiles"
+        )]
+    return []
 
-@app.callback(Output("gemini-summary", "children"), Input("texas-map", "center"))
-def ai_report(center):
-    if not GEMINI_API_KEY: return "Key missing."
-    prompt = f"Summarize solar market at {center} for 2026. 2 sentences."
+# 3. Supply, Demand, and Market Graphs
+@app.callback(
+    [Output("live-supply-demand", "figure"), Output("market-candlestick", "figure")],
+    Input("coords-store", "data")
+)
+def update_solar_data(coords):
+    lat, lon = coords['lat'], coords['lon']
+    
+    weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=shortwave_radiation,temperature_2m&timezone=auto"
+    
     try:
-        r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}", 
-                          json={"contents": [{"parts": [{"text": prompt}]}]})
-        return r.json()['candidates'][0]['content']['parts'][0]['text']
-    except: return "AI currently busy."
+        r = requests.get(weather_url, timeout=5).json()
+        df = pd.DataFrame({
+            'time': pd.to_datetime(r['hourly']['time']), 
+            'ghi': r['hourly']['shortwave_radiation'],
+            'temp': r['hourly']['temperature_2m']
+        })
+        
+        # Logic: Supply (Solar Generation) vs Demand (Simulated Load Curve)
+        df['supply_mw'] = (df['ghi'] * 500 * 0.20) / 1000 # Scaling for a mid-size solar farm
+        
+        # Simulating Demand: Peak load usually at 5 PM (17:00)
+        df['hour'] = df['time'].dt.hour
+        df['demand_mw'] = 50 + 30 * np.sin((df['hour'] - 10) * np.pi / 12) 
+
+        # 1. Supply & Demand Figure
+        fig_sd = go.Figure()
+        fig_sd.add_trace(go.Scatter(x=df['time'], y=df['supply_mw'], name="Solar Supply (MW)", fill='tozeroy', line=dict(color='#FFD700')))
+        fig_sd.add_trace(go.Scatter(x=df['time'], y=df['demand_mw'], name="Est. Grid Demand (MW)", line=dict(color='#00FFCC', dash='dash')))
+        
+        fig_sd.update_layout(
+            title="Localized Energy Balance (24h Forecast)",
+            template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
+
+        # 2. Market OHLC Simulation based on supply/demand delta
+        df['price_sim'] = (df['demand_mw'] - df['supply_mw']) * 2 # Simple scarcity pricing
+        fig_candle = go.Figure(data=[go.Candlestick(
+            x=df['time'][:24],
+            open=df['price_sim'][:24] * 0.98,
+            high=df['price_sim'][:24] * 1.05,
+            low=df['price_sim'][:24] * 0.92,
+            close=df['price_sim'][:24],
+            increasing_line_color='#00FFCC', decreasing_line_color='#FF4C4C'
+        )])
+        fig_candle.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis_rangeslider_visible=False)
+        
+        return fig_sd, fig_candle
+    except Exception as e:
+        print(f"Data Error: {e}")
+        return go.Figure(), go.Figure()
+
+# 4. ETF Update
+@app.callback(Output("solar-etf-mini", "figure"), Input("zip-btn", "n_clicks"))
+def update_etf_chart(_):
+    try:
+        data = yf.download("TAN", period="1mo", interval="1d", progress=False)
+        # Handle the new YFinance multi-index columns
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = data.columns.get_level_values(0)
+            
+        fig = go.Figure(go.Scatter(x=data.index, y=data['Close'], line=dict(color='#00CCFF', width=3), fill='tozeroy'))
+        fig.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(l=0,r=0,t=0,b=0))
+        return fig
+    except:
+        return go.Figure()
 
 if __name__ == "__main__":
     app.run_server(debug=True)
