@@ -3,3 +3,6 @@ dash-leaflet
 plotly
 pandas
 numpy
+requests
+yfinance
+genai
