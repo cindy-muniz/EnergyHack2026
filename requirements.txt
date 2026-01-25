@@ -1,8 +1,9 @@
-dash>=2.15.0
+dash
 dash-bootstrap-components
 dash-leaflet
 pandas
 requests
 geopy
-yfinance>=0.2.35
+yfinance
 numpy
+gunicorn
