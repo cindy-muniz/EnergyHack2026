@@ -2,7 +2,6 @@ dash
 dash-bootstrap-components
 dash-leaflet
 pandas
-requests
 geopy
 yfinance
 numpy
