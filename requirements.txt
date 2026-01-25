@@ -5,4 +5,5 @@ pandas
 requests
 geopy
 numpy
+scipy
 gunicorn
