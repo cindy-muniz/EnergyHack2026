@@ -1,136 +1,162 @@
 import dash
-from dash import dcc, html
-import dash_bootstrap_components as dbc
-import dash_leaflet as dl
+import dash_core_components as dcc
+import dash_html_components as html
 import plotly.graph_objs as go
-import pandas as pd
-import requests
-import openai
-import yfinance as yf
+import dash_daq as daq
+import dash_leaflet as dl
 from dash.dependencies import Input, Output
-import json
+import pandas as pd
+import yfinance as yf
+import openai
+import os
 
-# Initialize the app
-app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+# Load environment variables (ensure you set them on Render)
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# Your OpenAI API Key (use environment variables for better security)
-openai.api_key = 'your-openai-api-key-here'
+# Data for the zones (simplified example, replace with real data)
+data = {
+    'ERCOT Zone 1': {
+        'commercial_supply': [100, 150, 200, 250, 300, 350],
+        'residential_supply': [80, 130, 170, 220, 270, 300],
+        'commercial_demand': [110, 160, 210, 260, 310, 360],
+        'residential_demand': [90, 140, 180, 230, 280, 310],
+        'equilibrium': [105, 145, 185, 235, 285, 325],
+        'tou_pricing': [0.12, 0.15, 0.18, 0.20, 0.22, 0.24],
+    },
+    'ERCOT Zone 2': {
+        'commercial_supply': [120, 160, 210, 250, 300, 350],
+        'residential_supply': [90, 140, 180, 230, 280, 320],
+        'commercial_demand': [115, 165, 215, 255, 305, 355],
+        'residential_demand': [95, 145, 185, 235, 285, 325],
+        'equilibrium': [110, 150, 190, 240, 290, 330],
+        'tou_pricing': [0.14, 0.17, 0.19, 0.21, 0.23, 0.25],
+    }
+}
 
-# Sample map data (replace with your actual data and coordinates)
-map_data = [
-    {"name": "ERCOT Zone 1", "lat": 30.0, "lon": -97.0},
-    {"name": "ERCOT Zone 2", "lat": 31.0, "lon": -98.0},
-    {"name": "ERCOT Zone 3", "lat": 32.0, "lon": -99.0}
-]
+app = dash.Dash(__name__)
 
-# Sample weather data (replace with your actual weather API call)
-weather_data = [
-    {"name": "ERCOT Zone 1", "temperature": 22.5, "wind_speed": 10, "lat": 30.0, "lon": -97.0},
-    {"name": "ERCOT Zone 2", "temperature": 23.1, "wind_speed": 12, "lat": 31.0, "lon": -98.0},
-    {"name": "ERCOT Zone 3", "temperature": 21.8, "wind_speed": 8, "lat": 32.0, "lon": -99.0}
-]
-
-# Placeholder for solar data (replace with actual supply/demand data)
-supply_demand_data = pd.DataFrame({
-    'time': pd.date_range(start='2023-01-01', periods=24, freq='H'),
-    'residential_demand': [200 + i * 2 for i in range(24)],
-    'commercial_demand': [500 + i * 3 for i in range(24)],
-    'solar_supply': [300 + i * 4 for i in range(24)],
-    'equilibrium': [350 + i * 2 for i in range(24)],
-    'TOU_pricing': [0.12 + i * 0.001 for i in range(24)]
-})
-
-# Layout with map on the left, chart on the right
 app.layout = html.Div([
-    dbc.Row([
-        # Map section (Left side)
-        dbc.Col([
+    # Header Section with Title and Disclaimer
+    html.Header([
+        html.H1("Specusol - Texas Solar Energy Hub", style={'text-align': 'center'}),
+        html.P("All content is for informational purposes only. Specusol is not a financial advisor and does not provide investment advice.", style={'text-align': 'center', 'font-size': '12px', 'color': 'gray'}),
+    ]),
+
+    # Main Layout Section with Map on the left and Chart on the right
+    html.Div([
+        # Left column: Interactive Map (with Texas-focused view)
+        html.Div([
             dl.Map([
                 dl.TileLayer(),
                 dl.LayerGroup(id="weather-layer"),
                 dl.MarkerCluster([
-                    dl.Marker(position=(zone["lat"], zone["lon"]), children=[
-                        dl.Tooltip(zone["name"])
-                    ]) for zone in map_data
+                    dl.Marker(position=(31.0, -99.0), children=[
+                        dl.Tooltip("ERCOT Zone 1")
+                    ]),
+                    dl.Marker(position=(30.0, -98.0), children=[
+                        dl.Tooltip("ERCOT Zone 2")
+                    ])
                 ])
-            ], id="map", style={'height': '500px'}),
-        ], width=6),
+            ], id="map", center=(31.0, -99.0), zoom=6, style={'height': '500px'}),
+        ], style={'display': 'inline-block', 'width': '50%'}),
 
-        # Chart section (Right side)
-        dbc.Col([
-            dcc.Graph(id='supply-demand-chart'),
-            html.Div(id='gemini-summary')
-        ], width=6)
-    ])
+        # Right column: Dynamic Chart with Supply & Demand Data
+        html.Div([
+            dcc.Graph(id='dynamic-chart'),
+        ], style={'display': 'inline-block', 'width': '50%'}),
+    ], style={'display': 'flex'}),
+
+    # Footer Section with Financial Data (Stock and Gemini AI)
+    html.Footer([
+        html.Div([
+            html.H3("Financial Insights", style={'text-align': 'center'}),
+            dcc.Dropdown(id='stock-dropdown', options=[
+                {'label': 'SPWR - SunPower Corp', 'value': 'SPWR'},
+                {'label': 'FSLR - First Solar', 'value': 'FSLR'},
+                {'label': 'SEDG - SolarEdge Technologies', 'value': 'SEDG'}
+            ], value='SPWR', style={'width': '100%', 'margin-bottom': '20px'}),
+            html.Div(id='stock-info', style={'text-align': 'center'}),
+            html.Div(id='gemini-summary', style={'text-align': 'center', 'margin-top': '20px'}),
+        ])
+    ], style={'margin-top': '20px'})
 ])
 
-# Callback to overlay weather data on the map
+# Update the chart when a map location is clicked
 @app.callback(
-    Output('weather-layer', 'children'),
-    Input('map', 'click_lat_lng')
+    Output('dynamic-chart', 'figure'),
+    [Input('map', 'click_feature')]
 )
-def update_weather_on_map(click_lat_lng):
-    weather_markers = []
+def update_chart(selected_zone):
+    if not selected_zone:
+        return go.Figure()
+
+    zone = selected_zone['properties']['name']  # Get the zone name from map click
+
+    # Get the zone data
+    zone_data = data.get(zone)
     
-    # Filter weather data based on the clicked coordinates
-    if click_lat_lng:
-        clicked_lat, clicked_lon = click_lat_lng
-        for data in weather_data:
-            if abs(data['lat'] - clicked_lat) < 1 and abs(data['lon'] - clicked_lon) < 1:
-                weather_markers.append(
-                    dl.Marker(position=(data['lat'], data['lon']), children=[
-                        dl.Tooltip(f"Temp: {data['temperature']}°C, Wind: {data['wind_speed']} km/h")
-                    ])
-                )
-    return weather_markers
+    if zone_data:
+        fig = go.Figure()
 
-# Callback to update chart when clicking on the map
+        # Add commercial supply and demand traces
+        fig.add_trace(go.Scatter(x=list(range(len(zone_data['commercial_supply']))),
+                                 y=zone_data['commercial_supply'], mode='lines', name='Commercial Supply'))
+        fig.add_trace(go.Scatter(x=list(range(len(zone_data['commercial_demand']))),
+                                 y=zone_data['commercial_demand'], mode='lines', name='Commercial Demand'))
+
+        # Add residential supply and demand traces
+        fig.add_trace(go.Scatter(x=list(range(len(zone_data['residential_supply']))),
+                                 y=zone_data['residential_supply'], mode='lines', name='Residential Supply'))
+        fig.add_trace(go.Scatter(x=list(range(len(zone_data['residential_demand']))),
+                                 y=zone_data['residential_demand'], mode='lines', name='Residential Demand'))
+
+        # Add equilibrium line
+        fig.add_trace(go.Scatter(x=list(range(len(zone_data['equilibrium']))),
+                                 y=zone_data['equilibrium'], mode='lines', name='Equilibrium'))
+
+        # Add TOU pricing
+        fig.add_trace(go.Scatter(x=list(range(len(zone_data['tou_pricing']))),
+                                 y=zone_data['tou_pricing'], mode='lines', name='TOU Pricing', line=dict(color='orange')))
+
+        fig.update_layout(
+            title=f"Energy Supply & Demand for {zone}",
+            xaxis_title="Time of Day",
+            yaxis_title="kW / $/kWh"
+        )
+
+        return fig
+
+    return go.Figure()
+
+
+# Fetch the financial data when stock is selected
 @app.callback(
-    Output('supply-demand-chart', 'figure'),
-    Input('map', 'click_lat_lng')
+    Output('stock-info', 'children'),
+    [Input('stock-dropdown', 'value')]
 )
-def update_chart(click_lat_lng):
-    # If a map location is clicked, filter supply and demand data accordingly
-    if click_lat_lng:
-        clicked_lat, clicked_lon = click_lat_lng
-        zone = next((zone for zone in map_data if abs(zone['lat'] - clicked_lat) < 1 and abs(zone['lon'] - clicked_lon) < 1), None)
-        if zone:
-            # Filter supply/demand data (this is a simple placeholder, adapt it as needed)
-            supply_demand_data_filtered = supply_demand_data
-            figure = {
-                'data': [
-                    go.Scatter(x=supply_demand_data_filtered['time'], y=supply_demand_data_filtered['residential_demand'], mode='lines', name='Residential Demand'),
-                    go.Scatter(x=supply_demand_data_filtered['time'], y=supply_demand_data_filtered['commercial_demand'], mode='lines', name='Commercial Demand'),
-                    go.Scatter(x=supply_demand_data_filtered['time'], y=supply_demand_data_filtered['solar_supply'], mode='lines', name='Solar Supply'),
-                    go.Scatter(x=supply_demand_data_filtered['time'], y=supply_demand_data_filtered['equilibrium'], mode='lines', name='Equilibrium'),
-                    go.Scatter(x=supply_demand_data_filtered['time'], y=supply_demand_data_filtered['TOU_pricing'], mode='lines', name='TOU Pricing'),
-                ],
-                'layout': go.Layout(title=f"Supply and Demand for {zone['name']}", xaxis={'title': 'Time'}, yaxis={'title': 'MW / Pricing'}),
-            }
-            return figure
-    return {}
+def fetch_stock_data(ticker):
+    stock = yf.Ticker(ticker)
+    stock_info = stock.history(period="5d")
+    return html.Div([
+        html.P(f"Latest Closing Price: ${stock_info['Close'].iloc[-1]:.2f}"),
+        html.P(f"5-Day Price Change: ${stock_info['Close'].iloc[-1] - stock_info['Close'].iloc[0]:.2f}")
+    ])
 
-# Callback to fetch Gemini AI summary
+# Fetch the Gemini AI summary when requested
 @app.callback(
     Output('gemini-summary', 'children'),
-    Input('map', 'click_lat_lng')
+    [Input('stock-dropdown', 'value')]
 )
-def fetch_gemini_summary(click_lat_lng):
-    if click_lat_lng:
-        response = openai.Completion.create(
-            model="text-davinci-003",
-            prompt="Summarize the latest data on the solar energy market and trends for investment.",
-            temperature=0.5,
-            max_tokens=100
-        )
-        return html.Div([
-            html.H5("Gemini AI Summary:"),
-            html.P(response.choices[0].text.strip())
-        ])
-    return "Select a location on the map to get the summary."
+def fetch_gemini_summary(ticker):
+    prompt = f"Provide a detailed summary of the {ticker} stock, including its solar energy market impact."
+    response = openai.Completion.create(
+        engine="gpt-3.5-turbo",
+        prompt=prompt,
+        max_tokens=200
+    )
+    return html.P(response['choices'][0]['text'].strip())
 
-# Run the app
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     app.run_server(debug=True)
-
 
