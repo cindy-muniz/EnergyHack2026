@@ -1,54 +1,82 @@
-# ⚡ Specusol — Texas Solar Stock Market Dashboard
+<p align="center">
+  <img src="assets/logo.png" alt="Specusol" width="380">
+</p>
 
-> Built at **EnergyHack @ Georgia Tech** (January 2026) · 24-hour hackathon project  
-> 🏆 Live demo: [energyhack2026.onrender.com](https://energyhack2026.onrender.com)
+<h1 align="center">Specusol — Solar Energy Market Dashboard</h1>
 
----
-
-## What It Does
-
-Specusol is an interactive web dashboard that treats excess Texas solar energy as a tradeable financial asset. The core idea: solar farms on the ERCOT grid routinely generate more energy than the grid can use — so what if that surplus could be redirected and valued like a stock?
-
-The app gives energy analysts and grid operators a single view of:
-
-- **Real-time supply vs. demand curves** for residential and commercial solar across a 24-hour cycle
-- **ERCOT zone verification** — enter any Texas address and the app maps it to its ERCOT grid zone (North, South, West, Houston) using live geolocation
-- **Solar stock market tracker** — compare Texas-relevant equities (TAN, ENPH, VLO, FSLR, WHD) with candlestick charts, trend overlays, and options Greeks
-- **7-hour localized weather forecast** with solar irradiance estimates (W/m²) and temperature in Fahrenheit
-- **Grid health analytics** — live carbon intensity and grid frequency estimates, with the underlying formulas displayed for transparency
+<p align="center">
+  <em>Live Solar Insights for Texas Energy Leaders</em><br><br>
+  🔗 <a href="https://energyhack2026.onrender.com">Live demo</a>  ·  Built at <strong>EnergyHack @ Georgia Tech</strong>  ·  January 2026<br>
+  Python · Plotly Dash · deployed on Render
+</p>
 
 ---
 
-## Tech Stack
+## What it does
 
-| Layer | Technology |
-|---|---|
-| Language | Python 3 |
-| Web Framework | Plotly Dash + Dash Bootstrap Components |
-| Mapping | Dash Leaflet (CartoDB dark tile layer) |
-| Data / Math | NumPy, Pandas, SciPy (linear regression) |
-| Geolocation | Geopy / Nominatim |
-| Deployment | Render (live, public URL) |
+Specusol is an interactive web dashboard that treats excess Texas solar energy as a
+tradeable financial asset. Solar farms on the ERCOT grid routinely generate more energy
+than the grid can use — Specusol visualizes that surplus and lets you explore it from both
+an energy and a market angle.
 
----
+In one view, the app shows:
 
-## Key Features in the Code
+- **Supply vs. demand curves** — residential and commercial solar modeled across a 24-hour
+  cycle, with automatic equilibrium detection
+- **ERCOT zone verification** — enter any Texas address and the app maps it to its ERCOT grid
+  zone (North, South, West, Houston) using live geolocation
+- **Solar stock tracker** — Texas-relevant equities (TAN, ENPH, VLO, FSLR, WHD) with
+  candlestick charts and trend overlays
+- **7-hour weather forecast** — localized temperature and solar irradiance estimates (W/m²)
+- **Grid health analytics** — carbon intensity and grid-frequency estimates, with the
+  underlying formulas shown for transparency
 
-**Supply/Demand Equilibrium Detection** (`app.py` lines ~160–170)  
-Uses NumPy sign-change detection on the difference between total supply and demand curves to automatically annotate the market equilibrium point on the chart.
-
-**ERCOT Zone Boundary Logic** (`app.py` lines ~35–40)  
-Custom zone definitions using lat/lon bounding boxes for ERCOT's North, South, West, and Houston zones — implemented in pure Python for deployment stability on Render (no geospatial library dependencies).
-
-**Solar Irradiance Model** (`app.py` lines ~145–148)  
-Models daylight output using a Gaussian curve centered at 1:15 PM (`e^(-(t-13.25)²/2·2.5²) × 1000 W/m²`), giving a physically realistic bell-curve shape for solar generation throughout the day.
-
-**Options Greeks Display**  
-Displays Option Delta and Trend Confidence for solar asset portfolios, with a plain-English explanation of what the metrics mean for hedging against ERCOT volatility.
+![Specusol dashboard — a verified Houston ERCOT zone alongside the 24-hour supply/demand model with the equilibrium point annotated](assets/dashboard.png)
 
 ---
 
-## How to Run Locally
+## My role
+
+This was my first hackathon — and my first time using Git, GitHub, and Render. Jenna and I
+built Specusol together over 24 hours. We each worked in our own repository and merged our
+features into this final, deployed version at the end.
+
+**What I built**
+
+- **ERCOT zone map** — my idea, and I implemented the first working version: lat/lon bounding
+  boxes for the four ERCOT zones (pure Python, no geospatial dependencies, for deployment
+  stability on Render) with live address-to-zone lookup and pin-drop.
+- **Data visualizations** — the supply/demand curves and solar-output charts, including a
+  Gaussian daylight model (peaking ~1:15 PM at ~1000 W/m²) and the automatic supply/demand
+  equilibrium annotation.
+
+**What Jenna built**
+
+- The **solar stock market tracker** and related financial/Greeks analytics.
+
+We jointly integrated both halves, debugged the merge, and deployed the final app to Render.
+
+> 📝 This project also lives in a second repo,
+> [Specusol](https://github.com/cindy-muniz/Specusol) — my individual working copy from the
+> hackathon. Jenna and I each developed in our own repos and combined everything here for the
+> final deployed build.
+
+---
+
+## Tech stack
+
+| Layer         | Technology                              |
+|---------------|------------------------------------------|
+| Language      | Python 3                                 |
+| Web framework | Plotly Dash + Dash Bootstrap Components  |
+| Mapping       | Dash Leaflet                             |
+| Data / math   | NumPy, Pandas, SciPy                     |
+| Geolocation   | Geopy / Nominatim                        |
+| Deployment    | Render                                   |
+
+---
+
+## Run it locally
 
 ```bash
 git clone https://github.com/cindy-muniz/EnergyHack2026.git
@@ -63,20 +91,8 @@ Then open `http://localhost:8050` in your browser.
 
 ## Background
 
-This project was built collaboratively with teammate **Jenna** during EnergyHack 2026 at Georgia Tech. The hackathon prompt focused on energy innovation in Texas. We identified that ERCOT — the Texas grid operator — frequently experiences solar overgeneration with no clear mechanism for redistributing or valuing that excess energy.
-
-Our solution: model the surplus as a tradeable commodity, visualize it alongside real financial instruments in the Texas energy sector, and give grid operators a spatial tool to understand where generation is happening relative to demand zones.
-
-The Specusol repo (`github.com/cindy-muniz/Specusol`) contains the extended solo development of this idea, adding deeper analytics and map features beyond what was built during the 24-hour window.
-
----
-
-## Project Structure
-
-```
-EnergyHack2026/
-├── app.py              # Main Dash application (all logic and layout)
-├── requirements.txt    # Python dependencies
-└── assets/
-    └── logo.png        # Specusol branding asset
-```
+The EnergyHack prompt focused on energy innovation in Texas. Jenna and I noticed that
+ERCOT — the Texas grid operator — frequently sees solar overgeneration with no clear way to
+redistribute or value that excess energy. Our solution: model the surplus as a tradeable
+commodity, visualize it alongside real energy-sector financial instruments, and give a
+spatial tool for understanding where generation happens relative to demand zones.
