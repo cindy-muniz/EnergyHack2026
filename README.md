@@ -38,7 +38,7 @@ In one view, the app shows:
 ## My role
 
 This was my first hackathon — and my first time using Git, GitHub, and Render. Jenna and I
-built Specusol together over 24 hours. We each worked in our own repository and merged our
+built Specusol together in 36 hours. We each worked in our own repository and merged our
 features into this final, deployed version at the end.
 
 **What I built**
